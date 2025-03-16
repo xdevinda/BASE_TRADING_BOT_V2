@@ -10,7 +10,6 @@ const {
   DEFAULT_SLIPPAGE,
 } = require('./constants');
 
-// Remove provider definition here since it's now in index.js
 const tokenDetailsCache = new Map();
 
 async function getTokenDetails(tokenAddress, walletAddress, provider) {
@@ -63,7 +62,7 @@ async function getTokenPrice(tokenIn, tokenOut, amountIn, fee, provider) {
   console.log(`Calling Quoter at ${QUOTER_ADDRESS} with tokenIn: ${tokenIn}, tokenOut: ${tokenOut}, fee: ${fee}`);
   try {
     const amountOut = await quoter.quoteExactInputSingle(tokenIn, tokenOut, fee, amountIn, 0);
-    const decimalsOut = (await getTokenDetails(tokenOut, provider)).decimals;
+    const decimalsOut = (await getTokenDetails(tokenOut, tokenOut, provider)).decimals;
     return ethers.formatUnits(amountOut, decimalsOut);
   } catch (error) {
     console.log(`Quoter failed: ${error.message}`);
