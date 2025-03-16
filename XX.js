@@ -62,9 +62,11 @@ async function initializeWallets() {
     console.log(`Wallet ${i} address: ${derivedWallet.address}`);
   }
 
-  const mainWalletBalance = await provider.getBalance(wallets[0].address);
-  console.log(`${COLORS.BRIGHT_GREEN}\nMain Wallet (BIP-44 #0) Address: ${wallets[0].address} - Balance: ${ethers.formatEther(mainWalletBalance)} ETH${COLORS.RESET}`);
+  // Removed this line:
+  // const mainWalletBalance = await provider.getBalance(wallets[0].address);
+  // console.log(`${COLORS.BRIGHT_GREEN}\nMain Wallet (BIP-44 #0) Address: ${wallets[0].address} - Balance: ${ethers.formatEther(mainWalletBalance)} ETH${COLORS.RESET}`);
 }
+
 
 async function buyToken() {
   const tokenAddress = await askQuestion('Enter token address to buy: ');
@@ -928,7 +930,7 @@ async function start() {
 
     console.log(`${COLORS.BRIGHT_CYAN}\n--- Menu ---${COLORS.RESET}`);
     console.log(`Network: Base | Gas Price: ${ethers.formatUnits(gasPrice, 'gwei')} gwei | Block: ${blockNumber}`);
-    console.log(`${COLORS.BRIGHT_GREEN}::Main Wallet:::(BALANCE: ${ethers.formatEther(mainWalletBalance)} ETH)${COLORS.RESET}`);
+    console.log(`${COLORS.BRIGHT_GREEN}::Main Wallet:::(address:${wallets[0].address})${COLORS.BRIGHT_CYAN}(${ethers.formatEther(mainWalletBalance)} ETH)${COLORS.RESET}`);
     console.log('(1). Buy Tokens');
     console.log('(2). Sell Tokens');
     console.log(`${COLORS.BRIGHT_RED}(3). Send All ETH${COLORS.RESET}`);
