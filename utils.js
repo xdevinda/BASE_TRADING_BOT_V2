@@ -55,6 +55,7 @@ async function getTokenDetails(tokenAddress, walletAddress) {
   }
 }
 
+// ... (rest of utils.js remains unchanged)
 async function getTokenPrice(tokenIn, tokenOut, amountIn, fee) {
   const quoterInterface = new ethers.utils.Interface([
     'function quoteExactInputSingle(address tokenIn, address tokenOut, uint24 fee, uint256 amountIn, uint160 sqrtPriceLimitX96) external view returns (uint256 amountOut)',
@@ -64,6 +65,7 @@ async function getTokenPrice(tokenIn, tokenOut, amountIn, fee) {
   const decimalsOut = (await getTokenDetails(tokenOut)).decimals;
   return ethers.utils.formatUnits(amountOut, decimalsOut);
 }
+// ...
 
 async function executeSwap(wallet, tokenIn, tokenOut, amountIn, fee, isBuy = true, slippageTolerance = DEFAULT_SLIPPAGE) {
   const swapRouterInterface = new ethers.utils.Interface([
