@@ -40,7 +40,6 @@ async function initializeWallets() {
     process.exit(1);
   }
   try {
-    // Validate mnemonic
     ethers.HDNodeWallet.fromPhrase(process.env.MNEMONIC);
   } catch (error) {
     console.error('Error: Invalid MNEMONIC in .env file:', error.message);
@@ -74,7 +73,7 @@ async function buyToken() {
 
   const tokenDetailsBefore = await getTokenDetails(tokenAddress, wallets[0].address, provider);
   if (tokenDetailsBefore.error) {
-    console.error('Error fetching token details:', tokenDetailsBefore.error);
+    console.error('Error fetching token details before purchase:', tokenDetailsBefore.error);
     return;
   }
   console.log(`${COLORS.BRIGHT_GREEN}\n--- Token Details Before Purchase ---${COLORS.RESET}`, tokenDetailsBefore);
@@ -113,9 +112,11 @@ async function buyToken() {
     return;
   }
 
-  const tokenDetailsAfter = await getTokenDetails(tokenAddress, wallets[0].address, provider);
+  const tokenDetailsAfter = await getTokenDetails(tokenAddress, wallets[0].address, provider, true); // Force refresh
   if (!tokenDetailsAfter.error) {
     console.log(`${COLORS.BRIGHT_GREEN}\n--- Token Details After Purchase ---${COLORS.RESET}`, tokenDetailsAfter);
+  } else {
+    console.error('Error fetching token details after purchase:', tokenDetailsAfter.error);
   }
 }
 
@@ -144,11 +145,12 @@ async function sellTokens() {
     console.log('Invalid percentage. Please enter a number between 0 and 100.');
     return;
   }
+  // Use BigInt arithmetic directly
   const amountToSell = (balance * BigInt(Math.round(percentage * 100))) / 10000n;
 
   const tokenDetailsBefore = await getTokenDetails(tokenAddress, wallets[0].address, provider);
   if (tokenDetailsBefore.error) {
-    console.error('Error fetching token details:', tokenDetailsBefore.error);
+    console.error('Error fetching token details before sale:', tokenDetailsBefore.error);
     return;
   }
   console.log(`${COLORS.BRIGHT_RED}\n--- Token Details Before Sale ---${COLORS.RESET}`, tokenDetailsBefore);
@@ -209,9 +211,11 @@ async function sellTokens() {
     return;
   }
 
-  const tokenDetailsAfter = await getTokenDetails(tokenAddress, wallets[0].address, provider);
+  const tokenDetailsAfter = await getTokenDetails(tokenAddress, wallets[0].address, provider, true); // Force refresh
   if (!tokenDetailsAfter.error) {
     console.log(`${COLORS.BRIGHT_RED}\n--- Token Details After Sale ---${COLORS.RESET}`, tokenDetailsAfter);
+  } else {
+    console.error('Error fetching token details after sale:', tokenDetailsAfter.error);
   }
 }
 
@@ -289,6 +293,7 @@ async function sendToken() {
     return;
   }
 
+  // Use BigInt arithmetic directly
   const amount = (balance * BigInt(Math.round(percentage * 100))) / 10000n;
   if (amount === 0n) {
     console.log('Calculated amount to send is 0.');
@@ -309,34 +314,42 @@ async function sendToken() {
   console.log('Transaction hash:', tx.hash);
   await tx.wait();
   console.log('Token transfer confirmed (Main Wallet, BIP-44 #0)');
-}
 
+  // Refresh balance after transfer
+  const tokenDetailsAfter = await getTokenDetails(tokenAddress, wallets[0].address, provider, true);
+  if (!tokenDetailsAfter.error) {
+    console.log(`${COLORS.BRIGHT_CYAN}\n--- Token Details After Transfer ---${COLORS.RESET}`, tokenDetailsAfter);
+  } else {
+    console.error('Error fetching token details after transfer:', tokenDetailsAfter.error);
+  }
+}
 async function showWalletBalances() {
   const tokenAddress = await askQuestion('Enter token address (or press Enter for ETH): ');
   console.log('\n--- Wallet Balances ---');
 
   if (tokenAddress.trim() === '') {
-    const balances = await Promise.all(
-      wallets.map(async (wallet, i) => {
-        const balance = await provider.getBalance(wallet.address);
-        return `Wallet ${i} address: ${wallet.address} -${COLORS.BRIGHT_BLUE} ETH Balance: ${ethers.formatEther(balance)} ETH${COLORS.RESET}`;
-      })
-    );
+    const balances = [];
+    for (let i = 0; i < wallets.length; i++) {
+      const wallet = wallets[i];
+      const balance = await provider.getBalance(wallet.address);
+      balances.push(`Wallet ${i} address: ${wallet.address} -${COLORS.BRIGHT_BLUE} ETH Balance: ${ethers.formatEther(balance)} ETH${COLORS.RESET}`);
+    }
     console.log(balances.join('\n'));
   } else {
-    const tokenDetails = await getTokenDetails(tokenAddress, wallets[0].address, provider);
+    const tokenDetails = await getTokenDetails(tokenAddress, wallets[0].address, provider, true); // Force refresh
     if (tokenDetails.error) {
       console.error('Error fetching token details:', tokenDetails.error);
       return;
     }
     console.log('\n--- Token Details ---', tokenDetails);
 
-    const balances = await Promise.all(
-      wallets.map(async (wallet, i) => {
-        const balance = i === 0 ? tokenDetails.balance : (await getTokenDetails(tokenAddress, wallet.address, provider)).balance;
-        return `Wallet ${i} address: ${wallet.address} -${COLORS.BRIGHT_BLUE}${tokenDetails.symbol} Balance: ${balance} ${tokenDetails.symbol}${COLORS.RESET}`;
-      })
-    );
+    const balances = [];
+    for (let i = 0; i < wallets.length; i++) {
+      const wallet = wallets[i];
+      const details = await getTokenDetails(tokenAddress, wallet.address, provider, true); // Force refresh
+      const balance = details.error ? 'Error' : details.balance;
+      balances.push(`Wallet ${i} address: ${wallet.address} -${COLORS.BRIGHT_BLUE}${tokenDetails.symbol} Balance: ${balance} ${tokenDetails.symbol}${COLORS.RESET}`);
+    }
     console.log(balances.join('\n'));
   }
 }
@@ -395,7 +408,7 @@ async function buyWithMultipleWallets() {
     }
     if (!success) continue;
 
-    const tokenDetailsAfter = await getTokenDetails(tokenAddress, wallet.address, provider);
+    const tokenDetailsAfter = await getTokenDetails(tokenAddress, wallet.address, provider, true);
     if (!tokenDetailsAfter.error) {
       console.log(`${COLORS.BRIGHT_GREEN}\n--- Token Details After Purchase (Wallet ${i}) ---${COLORS.RESET}`, tokenDetailsAfter);
     }
@@ -465,7 +478,7 @@ async function buyWithWalletsDelayed() {
     }
     if (!success) continue;
 
-    const tokenDetailsAfter = await getTokenDetails(tokenAddress, wallet.address, provider);
+    const tokenDetailsAfter = await getTokenDetails(tokenAddress, wallet.address, provider, true);
     if (!tokenDetailsAfter.error) {
       console.log(`${COLORS.BRIGHT_GREEN}\n--- Token Details After Purchase (Wallet ${i}) ---${COLORS.RESET}`, tokenDetailsAfter);
     }
@@ -560,7 +573,7 @@ async function sellAllTokensFromAllWallets() {
     }
     if (!success) continue;
 
-    const tokenDetailsAfter = await getTokenDetails(tokenAddress, wallet.address, provider);
+    const tokenDetailsAfter = await getTokenDetails(tokenAddress, wallet.address, provider, true);
     if (!tokenDetailsAfter.error) {
       console.log(`${COLORS.BRIGHT_RED}\n--- Token Details After Sale (Wallet ${i}) ---${COLORS.RESET}`, tokenDetailsAfter);
     }
@@ -626,13 +639,20 @@ async function automateBuyAndSell() {
 
     let txHash;
     let success = false;
+    let tokenAmount;
     for (const fee of FEE_TIERS) {
       const [token0, token1] = sortTokens(WETH_ADDRESS, tokenAddress);
       const poolAddress = await factory.getPool(token0, token1, fee);
-      if (poolAddress === ethers.ZeroAddress) continue;
+      if (poolAddress === ethers.ZeroAddress) {
+        console.log(`No pool exists for fee tier ${fee}.`);
+        continue;
+      }
       try {
+        // Estimate token amount for output
+        tokenAmount = await getTokenPrice(WETH_ADDRESS, tokenAddress, amountIn, fee, provider);
         txHash = await executeSwap(wallet, WETH_ADDRESS, tokenAddress, amountIn, fee, provider, true);
         console.log(`Initial Buy tx hash ${COLORS.BRIGHT_CYAN}(Wallet ${i})${COLORS.RESET}: ${txHash}`);
+        console.log(`${COLORS.BRIGHT_GREEN}Bought ${tokenAmount} tokens${COLORS.RESET}`);
         success = true;
         break;
       } catch (error) {
@@ -665,6 +685,7 @@ async function automateBuyAndSell() {
       } else if (!dryRun) {
         let txHash;
         let success = false;
+        let tokenAmount;
         for (const fee of FEE_TIERS) {
           const [token0, token1] = sortTokens(WETH_ADDRESS, tokenAddress);
           const poolAddress = await factory.getPool(token0, token1, fee);
@@ -673,8 +694,11 @@ async function automateBuyAndSell() {
             continue;
           }
           try {
+            // Estimate token amount for output
+            tokenAmount = await getTokenPrice(WETH_ADDRESS, tokenAddress, amountIn, fee, provider);
             txHash = await executeSwap(wallet, WETH_ADDRESS, tokenAddress, amountIn, fee, provider, true);
             console.log(`Random Buy tx hash ${COLORS.BRIGHT_CYAN}(Wallet ${wallets.indexOf(wallet)})${COLORS.RESET}: ${txHash}`);
+            console.log(`${COLORS.BRIGHT_GREEN}Bought ${tokenAmount} tokens${COLORS.RESET}`);
             success = true;
             break;
           } catch (error) {
@@ -691,7 +715,7 @@ async function automateBuyAndSell() {
         [
           'function balanceOf(address) view returns (uint256)',
           'function approve(address spender, uint256 amount) public returns (bool)',
-          'function decimals() view returns (uint256)',
+          'function decimals() view returns (uint8)',
           'function allowance(address owner, address spender) view returns (uint256)',
         ],
         wallet
@@ -766,7 +790,6 @@ async function automateBuyAndSell() {
   console.log('Automation stopped.');
   rl.removeAllListeners('line');
 }
-
 async function sendAllETHFromAllWallets() {
   const recipient = await askQuestion('Enter recipient wallet address to send all ETH: ');
   if (!ethers.isAddress(recipient)) {
