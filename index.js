@@ -622,6 +622,61 @@ async function automateBuyAndSell() {
     if (dryRun) {
       console.log(`Dry run: Simulating initial buy for Wallet ${i}...`);
       continue;
+    }async function automateBuyAndSell() {
+  const tokenAddress = await askQuestion('Enter token address to buy and sell: ');
+  if (!ethers.isAddress(tokenAddress)) {
+    console.log('Invalid token address.');
+    return;
+  }
+
+  const minEthStr = await askQuestion('Enter minimum ETH amount to buy (e.g., 0.001): ');
+  const maxEthStr = await askQuestion('Enter maximum ETH amount to buy (e.g., 0.01): ');
+  const minSellPercentStr = await askQuestion('Enter minimum sell percentage (0-100): ');
+  const maxSellPercentStr = await askQuestion('Enter maximum sell percentage (0-100): ');
+  const minDelayStr = await askQuestion('Enter minimum delay between transactions in seconds (e.g., 1): ');
+  const maxDelayStr = await askQuestion('Enter maximum delay between transactions in seconds (e.g., 10): ');
+
+  const minEth = parseFloat(minEthStr);
+  const maxEth = parseFloat(maxEthStr);
+  const minSellPercent = parseFloat(minSellPercentStr);
+  const maxSellPercent = parseFloat(maxSellPercentStr);
+  const minDelay = parseFloat(minDelayStr);
+  const maxDelay = parseFloat(maxDelayStr);
+
+  if (isNaN(minEth) || isNaN(maxEth) || minEth <= 0 || maxEth <= minEth) {
+    console.log('Invalid ETH range.');
+    return;
+  }
+  if (isNaN(minSellPercent) || isNaN(maxSellPercent) || minSellPercent < 0 || maxSellPercent > 100 || minSellPercent >= maxSellPercent) {
+    console.log('Invalid sell percentage range.');
+    return;
+  }
+  if (isNaN(minDelay) || isNaN(maxDelay) || minDelay < 0 || maxDelay <= minDelay) {
+    console.log('Invalid delay range.');
+    return;
+  }
+
+  console.log(`Automation started. First ${wallets.length} transactions will be buys, then random. Type "STOP" to end.`);
+  let shouldStop = false;
+
+  rl.on('line', (input) => {
+    if (input.trim().toUpperCase() === 'STOP') shouldStop = true;
+  });
+
+  for (let i = 0; i < wallets.length && !shouldStop; i++) {
+    const wallet = wallets[i];
+    const randomEth = minEth + Math.random() * (maxEth - minEth);
+    const amountIn = ethers.parseEther(randomEth.toFixed(6).toString());
+    const ethBalance = await provider.getBalance(wallet.address);
+
+    if (ethBalance < amountIn + ((await getSafeGasPrice(provider)) * 50000n)) {
+      console.log(`${COLORS.BRIGHT_YELLOW}Wallet ${i} has insufficient ETH: ${ethers.formatEther(ethBalance)}${COLORS.RESET}`);
+      continue;
+    }
+
+    if (dryRun) {
+      console.log(`Dry run: Simulating initial buy for Wallet ${i}...`);
+      continue;
     }
 
     let txHash;
@@ -705,7 +760,7 @@ async function automateBuyAndSell() {
         const amountToSell = (balance * BigInt(Math.round(randomSellPercent * 100))) / 10000n;
 
         try {
-          const allowance = await tokenContract.allowance(wallet.address, SWAP_ROUTER_ADDRESS PAM);
+          const allowance = await tokenContract.allowance(wallet.address, SWAP_ROUTER_ADDRESS); // Fixed typo here
           if (allowance < amountToSell) {
             const gasPrice = await getSafeGasPrice(provider);
             const approveTx = await tokenContract.approve(SWAP_ROUTER_ADDRESS, amountToSell, { gasPrice });
