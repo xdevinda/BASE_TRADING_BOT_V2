@@ -41,8 +41,7 @@ async function initializeWallets() {
   }
   try {
     // Validate mnemonic
-    ethers.Wallet.fromPhrase(process.env.MNEMONIC);
-    console.log('Mnemonic:', process.env.MNEMONIC); // Debug mnemonic
+    ethers.HDNodeWallet.fromPhrase(process.env.MNEMONIC);
   } catch (error) {
     console.error('Error: Invalid MNEMONIC in .env file:', error.message);
     process.exit(1);
@@ -58,8 +57,8 @@ async function initializeWallets() {
 
   for (let i = 0; i < numWallets; i++) {
     const path = `m/44'/60'/0'/0/${i}`;
-    console.log(`Deriving wallet with path: ${path}`); // Debug path
-    const derivedWallet = ethers.Wallet.fromPhrase(process.env.MNEMONIC, { path }).connect(provider);
+    console.log(`Deriving wallet with path: ${path}`);
+    const derivedWallet = ethers.HDNodeWallet.fromPhrase(process.env.MNEMONIC, undefined, path).connect(provider);
     wallets.push(derivedWallet);
     console.log(`Wallet ${i} address: ${derivedWallet.address}`);
   }
@@ -706,7 +705,7 @@ async function automateBuyAndSell() {
         const amountToSell = (balance * BigInt(Math.round(randomSellPercent * 100))) / 10000n;
 
         try {
-          const allowance = await tokenContract.allowance(wallet.address, SWAP_ROUTER_ADDRESS);
+          const allowance = await tokenContract.allowance(wallet.address, SWAP_ROUTER_ADDRESS PAM);
           if (allowance < amountToSell) {
             const gasPrice = await getSafeGasPrice(provider);
             const approveTx = await tokenContract.approve(SWAP_ROUTER_ADDRESS, amountToSell, { gasPrice });
