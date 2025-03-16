@@ -1,13 +1,13 @@
-const ethers = require('ethers');
+const { ethers } = require('ethers');
 
 module.exports = {
   FACTORY_ADDRESS: '0x33128a8fC17869897dcE68Ed026d694621f6FDfD',
   SWAP_ROUTER_ADDRESS: '0x2626664c2603336E57B271c5C0b26F421741e481',
-  QUOTER_ADDRESS: '0x3d4e44Eb1374240cE5F1B871ab261CD6DaceaF95', // Checksummed
+  QUOTER_ADDRESS: ethers.getAddress('0x3d4e44Eb1374240cE5F1B871ab261CD6DaceaF95'),
   WETH_ADDRESS: '0x4200000000000000000000000000000000000006',
   FEE_TIERS: [500, 3000, 10000],
-  MAX_GAS_PRICE: ethers.utils.parseUnits('100', 'gwei'), // 100 gwei max
-  DEFAULT_SLIPPAGE: 0.005, // 0.5%
+  MAX_GAS_PRICE: ethers.parseUnits('100', 'gwei'),
+  DEFAULT_SLIPPAGE: 0.005,
   COLORS: {
     BRIGHT_RED: '\x1b[91m',
     BRIGHT_GREEN: '\x1b[92m',
