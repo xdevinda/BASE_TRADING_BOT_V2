@@ -15,8 +15,10 @@ const {
   getSafeGasPrice,
   sortTokens,
   withErrorHandling,
-  provider,
 } = require('./utils');
+
+// Define provider in index.js
+const provider = new ethers.JsonRpcProvider('https://mainnet.base.org');
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 const factoryInterface = new ethers.Interface(['function getPool(address tokenA, address tokenB, uint24 fee) external view returns (address pool)']);
@@ -38,7 +40,9 @@ async function initializeWallets() {
     process.exit(1);
   }
   try {
-    ethers.Wallet.fromPhrase(process.env.MNEMONIC); // v6 uses fromPhrase instead of fromMnemonic
+    // Validate mnemonic
+    ethers.Wallet.fromPhrase(process.env.MNEMONIC);
+    console.log('Mnemonic:', process.env.MNEMONIC); // Debug mnemonic
   } catch (error) {
     console.error('Error: Invalid MNEMONIC in .env file:', error.message);
     process.exit(1);
@@ -54,7 +58,8 @@ async function initializeWallets() {
 
   for (let i = 0; i < numWallets; i++) {
     const path = `m/44'/60'/0'/0/${i}`;
-    const derivedWallet = ethers.Wallet.fromPhrase(process.env.MNEMONIC, path).connect(provider);
+    console.log(`Deriving wallet with path: ${path}`); // Debug path
+    const derivedWallet = ethers.Wallet.fromPhrase(process.env.MNEMONIC, { path }).connect(provider);
     wallets.push(derivedWallet);
     console.log(`Wallet ${i} address: ${derivedWallet.address}`);
   }
@@ -68,7 +73,7 @@ async function buyToken() {
   const ethAmount = await askQuestion('Enter ETH amount to spend: ');
   const amountIn = ethers.parseEther(ethAmount);
 
-  const tokenDetailsBefore = await getTokenDetails(tokenAddress, wallets[0].address);
+  const tokenDetailsBefore = await getTokenDetails(tokenAddress, wallets[0].address, provider);
   if (tokenDetailsBefore.error) {
     console.error('Error fetching token details:', tokenDetailsBefore.error);
     return;
@@ -96,7 +101,7 @@ async function buyToken() {
       continue;
     }
     try {
-      txHash = await executeSwap(wallets[0], WETH_ADDRESS, tokenAddress, amountIn, fee, true);
+      txHash = await executeSwap(wallets[0], WETH_ADDRESS, tokenAddress, amountIn, fee, provider, true);
       console.log('Transaction hash:', txHash);
       success = true;
       break;
@@ -109,7 +114,7 @@ async function buyToken() {
     return;
   }
 
-  const tokenDetailsAfter = await getTokenDetails(tokenAddress, wallets[0].address);
+  const tokenDetailsAfter = await getTokenDetails(tokenAddress, wallets[0].address, provider);
   if (!tokenDetailsAfter.error) {
     console.log(`${COLORS.BRIGHT_GREEN}\n--- Token Details After Purchase ---${COLORS.RESET}`, tokenDetailsAfter);
   }
@@ -125,6 +130,7 @@ async function sellTokens() {
       'function balanceOf(address) view returns (uint256)',
       'function approve(address spender, uint256 amount) public returns (bool)',
       'function decimals() view returns (uint8)',
+      'function allowance(address owner, address spender) view returns (uint256)',
     ],
     wallets[0]
   );
@@ -141,7 +147,7 @@ async function sellTokens() {
   }
   const amountToSell = (balance * BigInt(Math.round(percentage * 100))) / 10000n;
 
-  const tokenDetailsBefore = await getTokenDetails(tokenAddress, wallets[0].address);
+  const tokenDetailsBefore = await getTokenDetails(tokenAddress, wallets[0].address, provider);
   if (tokenDetailsBefore.error) {
     console.error('Error fetching token details:', tokenDetailsBefore.error);
     return;
@@ -161,7 +167,7 @@ async function sellTokens() {
 
   const allowance = await tokenContract.allowance(wallets[0].address, SWAP_ROUTER_ADDRESS);
   if (allowance < amountToSell) {
-    const gasPrice = await getSafeGasPrice();
+    const gasPrice = await getSafeGasPrice(provider);
     const approveTx = await tokenContract.approve(SWAP_ROUTER_ADDRESS, amountToSell, { gasPrice });
     await approveTx.wait();
   }
@@ -176,13 +182,20 @@ async function sellTokens() {
       continue;
     }
     try {
-      txHash = await executeSwap(wallets[0], tokenAddress, WETH_ADDRESS, amountToSell, fee, false);
+      txHash = await executeSwap(wallets[0], tokenAddress, WETH_ADDRESS, amountToSell, fee, provider, false);
       console.log('Transaction hash:', txHash);
 
-      const wethContract = new ethers.Contract(WETH_ADDRESS, ['function withdraw(uint256 amount)'], wallets[0]);
+      const wethContract = new ethers.Contract(
+        WETH_ADDRESS,
+        [
+          'function balanceOf(address) view returns (uint256)',
+          'function withdraw(uint256 amount)',
+        ],
+        wallets[0]
+      );
       const wethBalance = await wethContract.balanceOf(wallets[0].address);
       if (wethBalance > 0n) {
-        const gasPrice = await getSafeGasPrice();
+        const gasPrice = await getSafeGasPrice(provider);
         await wethContract.withdraw(wethBalance, { gasPrice });
         console.log('WETH withdrawn to ETH (Main Wallet, BIP-44 #0)');
       }
@@ -197,7 +210,7 @@ async function sellTokens() {
     return;
   }
 
-  const tokenDetailsAfter = await getTokenDetails(tokenAddress, wallets[0].address);
+  const tokenDetailsAfter = await getTokenDetails(tokenAddress, wallets[0].address, provider);
   if (!tokenDetailsAfter.error) {
     console.log(`${COLORS.BRIGHT_RED}\n--- Token Details After Sale ---${COLORS.RESET}`, tokenDetailsAfter);
   }
@@ -211,7 +224,7 @@ async function sendAllETH() {
   }
 
   const balance = await provider.getBalance(wallets[0].address);
-  const gasPrice = await getSafeGasPrice();
+  const gasPrice = await getSafeGasPrice(provider);
   const gasLimit = 21000n;
   const gasBuffer = ethers.parseEther('0.0001');
   const totalCost = gasPrice * gasLimit + gasBuffer;
@@ -292,7 +305,7 @@ async function sendToken() {
     return;
   }
 
-  const gasPrice = await getSafeGasPrice();
+  const gasPrice = await getSafeGasPrice(provider);
   const tx = await tokenContract.transfer(recipient, amount, { gasPrice });
   console.log('Transaction hash:', tx.hash);
   await tx.wait();
@@ -312,7 +325,7 @@ async function showWalletBalances() {
     );
     console.log(balances.join('\n'));
   } else {
-    const tokenDetails = await getTokenDetails(tokenAddress, wallets[0].address);
+    const tokenDetails = await getTokenDetails(tokenAddress, wallets[0].address, provider);
     if (tokenDetails.error) {
       console.error('Error fetching token details:', tokenDetails.error);
       return;
@@ -321,7 +334,7 @@ async function showWalletBalances() {
 
     const balances = await Promise.all(
       wallets.map(async (wallet, i) => {
-        const balance = i === 0 ? tokenDetails.balance : (await getTokenDetails(tokenAddress, wallet.address)).balance;
+        const balance = i === 0 ? tokenDetails.balance : (await getTokenDetails(tokenAddress, wallet.address, provider)).balance;
         return `Wallet ${i} address: ${wallet.address} -${COLORS.BRIGHT_BLUE}${tokenDetails.symbol} Balance: ${balance} ${tokenDetails.symbol}${COLORS.RESET}`;
       })
     );
@@ -352,12 +365,12 @@ async function buyWithMultipleWallets() {
     const amountIn = ethers.parseEther(randomEth.toFixed(6).toString());
     const balance = await provider.getBalance(wallet.address);
 
-    if (balance < amountIn + ((await getSafeGasPrice()) * 50000n)) {
+    if (balance < amountIn + ((await getSafeGasPrice(provider)) * 50000n)) {
       console.log(`Wallet ${i} (${wallet.address}) has insufficient ETH: ${ethers.formatEther(balance)}`);
       continue;
     }
 
-    const tokenDetailsBefore = await getTokenDetails(tokenAddress, wallet.address);
+    const tokenDetailsBefore = await getTokenDetails(tokenAddress, wallet.address, provider);
     if (tokenDetailsBefore.error) continue;
     console.log(`${COLORS.BRIGHT_GREEN}\n--- Token Details Before Purchase (Wallet ${i}) ---${COLORS.RESET}`, tokenDetailsBefore);
 
@@ -373,7 +386,7 @@ async function buyWithMultipleWallets() {
       const poolAddress = await factory.getPool(token0, token1, fee);
       if (poolAddress === ethers.ZeroAddress) continue;
       try {
-        txHash = await executeSwap(wallet, WETH_ADDRESS, tokenAddress, amountIn, fee, true);
+        txHash = await executeSwap(wallet, WETH_ADDRESS, tokenAddress, amountIn, fee, provider, true);
         console.log(`Wallet ${i} transaction hash: ${txHash}`);
         success = true;
         break;
@@ -383,7 +396,7 @@ async function buyWithMultipleWallets() {
     }
     if (!success) continue;
 
-    const tokenDetailsAfter = await getTokenDetails(tokenAddress, wallet.address);
+    const tokenDetailsAfter = await getTokenDetails(tokenAddress, wallet.address, provider);
     if (!tokenDetailsAfter.error) {
       console.log(`${COLORS.BRIGHT_GREEN}\n--- Token Details After Purchase (Wallet ${i}) ---${COLORS.RESET}`, tokenDetailsAfter);
     }
@@ -422,12 +435,12 @@ async function buyWithWalletsDelayed() {
     const amountIn = ethers.parseEther(randomEth.toFixed(6).toString());
     const balance = await provider.getBalance(wallet.address);
 
-    if (balance < amountIn + ((await getSafeGasPrice()) * 50000n)) {
+    if (balance < amountIn + ((await getSafeGasPrice(provider)) * 50000n)) {
       console.log(`Wallet ${i} (${wallet.address}) has insufficient ETH: ${ethers.formatEther(balance)}`);
       continue;
     }
 
-    const tokenDetailsBefore = await getTokenDetails(tokenAddress, wallet.address);
+    const tokenDetailsBefore = await getTokenDetails(tokenAddress, wallet.address, provider);
     if (tokenDetailsBefore.error) continue;
     console.log(`${COLORS.BRIGHT_GREEN}\n--- Token Details Before Purchase (Wallet ${i}) ---${COLORS.RESET}`, tokenDetailsBefore);
 
@@ -443,7 +456,7 @@ async function buyWithWalletsDelayed() {
       const poolAddress = await factory.getPool(token0, token1, fee);
       if (poolAddress === ethers.ZeroAddress) continue;
       try {
-        txHash = await executeSwap(wallet, WETH_ADDRESS, tokenAddress, amountIn, fee, true);
+        txHash = await executeSwap(wallet, WETH_ADDRESS, tokenAddress, amountIn, fee, provider, true);
         console.log(`Wallet ${i} transaction hash: ${txHash}`);
         success = true;
         break;
@@ -453,7 +466,7 @@ async function buyWithWalletsDelayed() {
     }
     if (!success) continue;
 
-    const tokenDetailsAfter = await getTokenDetails(tokenAddress, wallet.address);
+    const tokenDetailsAfter = await getTokenDetails(tokenAddress, wallet.address, provider);
     if (!tokenDetailsAfter.error) {
       console.log(`${COLORS.BRIGHT_GREEN}\n--- Token Details After Purchase (Wallet ${i}) ---${COLORS.RESET}`, tokenDetailsAfter);
     }
@@ -488,6 +501,7 @@ async function sellAllTokensFromAllWallets() {
         'function balanceOf(address) view returns (uint256)',
         'function approve(address spender, uint256 amount) public returns (bool)',
         'function decimals() view returns (uint8)',
+        'function allowance(address owner, address spender) view returns (uint256)',
       ],
       wallet
     );
@@ -499,7 +513,7 @@ async function sellAllTokensFromAllWallets() {
     }
 
     const amountToSell = (balance * BigInt(Math.round(percentage * 100))) / 10000n;
-    const tokenDetailsBefore = await getTokenDetails(tokenAddress, wallet.address);
+    const tokenDetailsBefore = await getTokenDetails(tokenAddress, wallet.address, provider);
     if (tokenDetailsBefore.error) continue;
     console.log(`${COLORS.BRIGHT_RED}\n--- Token Details Before Sale (Wallet ${i}) ---${COLORS.RESET}`, tokenDetailsBefore);
 
@@ -510,7 +524,7 @@ async function sellAllTokensFromAllWallets() {
 
     const allowance = await tokenContract.allowance(wallet.address, SWAP_ROUTER_ADDRESS);
     if (allowance < amountToSell) {
-      const gasPrice = await getSafeGasPrice();
+      const gasPrice = await getSafeGasPrice(provider);
       const approveTx = await tokenContract.approve(SWAP_ROUTER_ADDRESS, amountToSell, { gasPrice });
       await approveTx.wait();
     }
@@ -522,13 +536,20 @@ async function sellAllTokensFromAllWallets() {
       const poolAddress = await factory.getPool(token0, token1, fee);
       if (poolAddress === ethers.ZeroAddress) continue;
       try {
-        txHash = await executeSwap(wallet, tokenAddress, WETH_ADDRESS, amountToSell, fee, false);
+        txHash = await executeSwap(wallet, tokenAddress, WETH_ADDRESS, amountToSell, fee, provider, false);
         console.log(`Wallet ${i} transaction hash: ${txHash}`);
 
-        const wethContract = new ethers.Contract(WETH_ADDRESS, ['function withdraw(uint256 amount)'], wallet);
+        const wethContract = new ethers.Contract(
+          WETH_ADDRESS,
+          [
+            'function balanceOf(address) view returns (uint256)',
+            'function withdraw(uint256 amount)',
+          ],
+          wallet
+        );
         const wethBalance = await wethContract.balanceOf(wallet.address);
         if (wethBalance > 0n) {
-          const gasPrice = await getSafeGasPrice();
+          const gasPrice = await getSafeGasPrice(provider);
           await wethContract.withdraw(wethBalance, { gasPrice });
           console.log(`Wallet ${i} withdrew ${ethers.formatEther(wethBalance)} ETH from WETH`);
         }
@@ -540,7 +561,7 @@ async function sellAllTokensFromAllWallets() {
     }
     if (!success) continue;
 
-    const tokenDetailsAfter = await getTokenDetails(tokenAddress, wallet.address);
+    const tokenDetailsAfter = await getTokenDetails(tokenAddress, wallet.address, provider);
     if (!tokenDetailsAfter.error) {
       console.log(`${COLORS.BRIGHT_RED}\n--- Token Details After Sale (Wallet ${i}) ---${COLORS.RESET}`, tokenDetailsAfter);
     }
@@ -594,7 +615,7 @@ async function automateBuyAndSell() {
     const amountIn = ethers.parseEther(randomEth.toFixed(6).toString());
     const ethBalance = await provider.getBalance(wallet.address);
 
-    if (ethBalance < amountIn + ((await getSafeGasPrice()) * 50000n)) {
+    if (ethBalance < amountIn + ((await getSafeGasPrice(provider)) * 50000n)) {
       console.log(`${COLORS.BRIGHT_YELLOW}Wallet ${i} has insufficient ETH: ${ethers.formatEther(ethBalance)}${COLORS.RESET}`);
       continue;
     }
@@ -611,7 +632,7 @@ async function automateBuyAndSell() {
       const poolAddress = await factory.getPool(token0, token1, fee);
       if (poolAddress === ethers.ZeroAddress) continue;
       try {
-        txHash = await executeSwap(wallet, WETH_ADDRESS, tokenAddress, amountIn, fee, true);
+        txHash = await executeSwap(wallet, WETH_ADDRESS, tokenAddress, amountIn, fee, provider, true);
         console.log(`Initial Buy tx hash ${COLORS.BRIGHT_CYAN}(Wallet ${i})${COLORS.RESET}: ${txHash}`);
         success = true;
         break;
@@ -640,7 +661,7 @@ async function automateBuyAndSell() {
       const amountIn = ethers.parseEther(randomEth.toFixed(6).toString());
       const ethBalance = await provider.getBalance(wallet.address);
 
-      if (ethBalance < amountIn + ((await getSafeGasPrice()) * 50000n)) {
+      if (ethBalance < amountIn + ((await getSafeGasPrice(provider)) * 50000n)) {
         console.log(`${COLORS.BRIGHT_YELLOW}Wallet has insufficient ETH: ${ethers.formatEther(ethBalance)}${COLORS.RESET}`);
       } else if (!dryRun) {
         let txHash;
@@ -653,7 +674,7 @@ async function automateBuyAndSell() {
             continue;
           }
           try {
-            txHash = await executeSwap(wallet, WETH_ADDRESS, tokenAddress, amountIn, fee, true);
+            txHash = await executeSwap(wallet, WETH_ADDRESS, tokenAddress, amountIn, fee, provider, true);
             console.log(`Random Buy tx hash ${COLORS.BRIGHT_CYAN}(Wallet ${wallets.indexOf(wallet)})${COLORS.RESET}: ${txHash}`);
             success = true;
             break;
@@ -687,7 +708,7 @@ async function automateBuyAndSell() {
         try {
           const allowance = await tokenContract.allowance(wallet.address, SWAP_ROUTER_ADDRESS);
           if (allowance < amountToSell) {
-            const gasPrice = await getSafeGasPrice();
+            const gasPrice = await getSafeGasPrice(provider);
             const approveTx = await tokenContract.approve(SWAP_ROUTER_ADDRESS, amountToSell, { gasPrice });
             await approveTx.wait();
             console.log(`Approved ${ethers.formatUnits(amountToSell, await tokenContract.decimals())} tokens for Wallet ${wallets.indexOf(wallet)}`);
@@ -703,7 +724,7 @@ async function automateBuyAndSell() {
               continue;
             }
             try {
-              txHash = await executeSwap(wallet, tokenAddress, WETH_ADDRESS, amountToSell, fee, false);
+              txHash = await executeSwap(wallet, tokenAddress, WETH_ADDRESS, amountToSell, fee, provider, false);
               console.log(`Sell tx hash ${COLORS.BRIGHT_CYAN}(Wallet ${wallets.indexOf(wallet)})${COLORS.RESET}: ${txHash}`);
 
               const wethContract = new ethers.Contract(
@@ -716,7 +737,7 @@ async function automateBuyAndSell() {
               );
               const wethBalance = await wethContract.balanceOf(wallet.address);
               if (wethBalance > 0n) {
-                const gasPrice = await getSafeGasPrice();
+                const gasPrice = await getSafeGasPrice(provider);
                 await wethContract.withdraw(wethBalance, { gasPrice });
                 console.log(`Withdrew ${ethers.formatEther(wethBalance)} ETH from WETH`);
               }
@@ -754,7 +775,7 @@ async function sendAllETHFromAllWallets() {
     return;
   }
 
-  const gasPrice = await getSafeGasPrice();
+  const gasPrice = await getSafeGasPrice(provider);
   const gasLimit = 21000n;
   const gasBuffer = ethers.parseEther('0.0001');
 
@@ -794,7 +815,7 @@ async function sendTokenFromAllWallets() {
     return;
   }
 
-  const gasPrice = await getSafeGasPrice();
+  const gasPrice = await getSafeGasPrice(provider);
   for (let i = 0; i < wallets.length; i++) {
     const wallet = wallets[i];
     const tokenContract = new ethers.Contract(
@@ -838,7 +859,7 @@ async function fundETHToWallets() {
 
   const mainWallet = wallets[0];
   const mainBalance = await provider.getBalance(mainWallet.address);
-  const gasPrice = await getSafeGasPrice();
+  const gasPrice = await getSafeGasPrice(provider);
   const gasLimit = 21000n;
 
   const totalGasCost = gasPrice * gasLimit * BigInt(wallets.length - 1);
@@ -879,8 +900,8 @@ async function start() {
 
   while (true) {
     const mainWalletBalance = await provider.getBalance(wallets[0].address);
-    const feeData = await provider.getFeeData(); // Updated to v6
-    const gasPrice = feeData.gasPrice; // Extract gasPrice from feeData
+    const feeData = await provider.getFeeData();
+    const gasPrice = feeData.gasPrice;
     const blockNumber = await provider.getBlockNumber();
 
     console.log(`${COLORS.BRIGHT_CYAN}\n--- Menu ---${COLORS.RESET}`);
@@ -926,7 +947,6 @@ async function start() {
   }
 }
 
-// Update the start call at the bottom
 start().catch(error => {
   console.error('Unexpected error:', error);
   rl.close();
