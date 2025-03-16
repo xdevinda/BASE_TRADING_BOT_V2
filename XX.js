@@ -980,7 +980,7 @@ async function start() {
 
     console.log(`${COLORS.BRIGHT_CYAN}\n[[[[[[[[[[[[--- Menu ---]]]]]]]]]]]]${COLORS.RESET}`);
     console.log(`Network: Base | Gas Price: ${ethers.formatUnits(gasPrice, 'gwei')} gwei | Block: ${blockNumber}`);
-    console.log(`${COLORS.BRIGHT_GREEN}::Main Wallet:::(address:${wallets[0].address})${COLORS.BRIGHT_CYAN}(${ethers.formatEther(mainWalletBalance)} ETH)${COLORS.RESET}`);
+    console.log(`${COLORS.BRIGHT_GREEN}::Main Wallet:::(${wallets[0].address})${COLORS.BRIGHT_CYAN}(${ethers.formatEther(mainWalletBalance)} ETH)${COLORS.RESET}`);
     console.log('(1). Buy Tokens');
     console.log('(2). Sell Tokens');
     console.log(`${COLORS.BRIGHT_RED}(3). *Send All ETH*${COLORS.RESET}`);
