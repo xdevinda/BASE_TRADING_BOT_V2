@@ -62,9 +62,11 @@ async function initializeWallets() {
     console.log(`Wallet ${i} address: ${derivedWallet.address}`);
   }
 
-  const mainWalletBalance = await provider.getBalance(wallets[0].address);
-  console.log(`${COLORS.BRIGHT_GREEN}\nMain Wallet (BIP-44 #0) Address: ${wallets[0].address} - Balance: ${ethers.formatEther(mainWalletBalance)} ETH${COLORS.RESET}`);
+  // Removed this line:
+  // const mainWalletBalance = await provider.getBalance(wallets[0].address);
+  // console.log(`${COLORS.BRIGHT_GREEN}\nMain Wallet (BIP-44 #0) Address: ${wallets[0].address} - Balance: ${ethers.formatEther(mainWalletBalance)} ETH${COLORS.RESET}`);
 }
+
 
 async function buyToken() {
   const tokenAddress = await askQuestion('Enter token address to buy: ');
