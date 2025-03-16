@@ -524,7 +524,7 @@ async function sellAllTokensFromAllWallets() {
       continue;
     }
 
-    const amountToSell = balance.mul(BigInt(Math.round(percentage * 100))).div(10000n);
+    const amountToSell = (balance * BigInt(Math.round(percentage * 100))) / 10000n;
     const tokenDetailsBefore = await getTokenDetails(tokenAddress, wallet.address, provider);
     if (tokenDetailsBefore.error) continue;
     console.log(`${COLORS.BRIGHT_RED}\n--- Token Details Before Sale (Wallet ${i}) ---${COLORS.RESET}`, tokenDetailsBefore);
@@ -535,7 +535,7 @@ async function sellAllTokensFromAllWallets() {
     }
 
     const allowance = await tokenContract.allowance(wallet.address, SWAP_ROUTER_ADDRESS);
-    if (allowance.lt(amountToSell)) {
+    if (allowance < amountToSell) {
       const gasPrice = await getSafeGasPrice(provider);
       const approveTx = await tokenContract.approve(SWAP_ROUTER_ADDRESS, amountToSell, { gasPrice });
       await approveTx.wait();
@@ -560,7 +560,7 @@ async function sellAllTokensFromAllWallets() {
           wallet
         );
         const wethBalance = await wethContract.balanceOf(wallet.address);
-        if (wethBalance.gt(0)) {
+        if (wethBalance > 0n) {
           const gasPrice = await getSafeGasPrice(provider);
           await wethContract.withdraw(wethBalance, { gasPrice });
           console.log(`Wallet ${i} withdrew ${ethers.formatEther(wethBalance)} ETH from WETH`);
