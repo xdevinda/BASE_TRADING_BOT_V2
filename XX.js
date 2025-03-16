@@ -293,7 +293,8 @@ async function sendToken() {
     return;
   }
 
-  const amount = balance.mul(BigInt(Math.round(percentage * 100))).div(10000n);
+  // Use BigInt arithmetic directly
+  const amount = (balance * BigInt(Math.round(percentage * 100))) / 10000n;
   if (amount === 0n) {
     console.log('Calculated amount to send is 0.');
     return;
@@ -313,8 +314,15 @@ async function sendToken() {
   console.log('Transaction hash:', tx.hash);
   await tx.wait();
   console.log('Token transfer confirmed (Main Wallet, BIP-44 #0)');
-}
 
+  // Refresh balance after transfer
+  const tokenDetailsAfter = await getTokenDetails(tokenAddress, wallets[0].address, provider, true);
+  if (!tokenDetailsAfter.error) {
+    console.log(`${COLORS.BRIGHT_CYAN}\n--- Token Details After Transfer ---${COLORS.RESET}`, tokenDetailsAfter);
+  } else {
+    console.error('Error fetching token details after transfer:', tokenDetailsAfter.error);
+  }
+}
 async function showWalletBalances() {
   const tokenAddress = await askQuestion('Enter token address (or press Enter for ETH): ');
   console.log('\n--- Wallet Balances ---');
