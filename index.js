@@ -928,19 +928,19 @@ async function start() {
     const gasPrice = feeData.gasPrice;
     const blockNumber = await provider.getBlockNumber();
 
-    console.log(`${COLORS.BRIGHT_CYAN}\n--- Menu ---${COLORS.RESET}`);
+    console.log(`${COLORS.BRIGHT_CYAN}\n[[[[[[[[[[[[--- Menu ---]]]]]]]]]]]]${COLORS.RESET}`);
     console.log(`Network: Base | Gas Price: ${ethers.formatUnits(gasPrice, 'gwei')} gwei | Block: ${blockNumber}`);
     console.log(`${COLORS.BRIGHT_GREEN}::Main Wallet:::(address:${wallets[0].address})${COLORS.BRIGHT_CYAN}(${ethers.formatEther(mainWalletBalance)} ETH)${COLORS.RESET}`);
     console.log('(1). Buy Tokens');
     console.log('(2). Sell Tokens');
-    console.log(`${COLORS.BRIGHT_RED}(3). Send All ETH${COLORS.RESET}`);
+    console.log(`${COLORS.BRIGHT_RED}(3). *Send All ETH*${COLORS.RESET}`);
     console.log('(4). Send Tokens');
     console.log('');
     console.log(`${COLORS.BRIGHT_GREEN}:::Multiple Wallets:::${COLORS.RESET}`);
     console.log('(5). Show Wallet Balances');
     console.log(`${COLORS.BRIGHT_CYAN}(6). Automate Buy and Sell${COLORS.RESET}`);
     console.log(`(7). Sell Tokens from All ${wallets.length} Wallets`);
-    console.log(`${COLORS.BRIGHT_RED}(8). Send All ETH from All ${wallets.length} Wallets${COLORS.RESET}`);
+    console.log(`${COLORS.BRIGHT_RED}(8). *Send All ETH from All ${wallets.length} Wallets*${COLORS.RESET}`);
     console.log(`(9). Fund ETH from Main Wallet to Others`);
     console.log(`(10). Buy with ${wallets.length} Wallets`);
     console.log(`(11). Buy with ${wallets.length} Wallets (Delayed)`);
