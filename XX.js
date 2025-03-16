@@ -639,6 +639,7 @@ async function automateBuyAndSell() {
 
     let txHash;
     let success = false;
+    let tokenAmount;
     for (const fee of FEE_TIERS) {
       const [token0, token1] = sortTokens(WETH_ADDRESS, tokenAddress);
       const poolAddress = await factory.getPool(token0, token1, fee);
@@ -647,8 +648,11 @@ async function automateBuyAndSell() {
         continue;
       }
       try {
+        // Estimate token amount for output
+        tokenAmount = await getTokenPrice(WETH_ADDRESS, tokenAddress, amountIn, fee, provider);
         txHash = await executeSwap(wallet, WETH_ADDRESS, tokenAddress, amountIn, fee, provider, true);
         console.log(`Initial Buy tx hash ${COLORS.BRIGHT_CYAN}(Wallet ${i})${COLORS.RESET}: ${txHash}`);
+        console.log(`${COLORS.BRIGHT_GREEN}Bought ${tokenAmount} tokens${COLORS.RESET}`);
         success = true;
         break;
       } catch (error) {
@@ -681,6 +685,7 @@ async function automateBuyAndSell() {
       } else if (!dryRun) {
         let txHash;
         let success = false;
+        let tokenAmount;
         for (const fee of FEE_TIERS) {
           const [token0, token1] = sortTokens(WETH_ADDRESS, tokenAddress);
           const poolAddress = await factory.getPool(token0, token1, fee);
@@ -689,8 +694,11 @@ async function automateBuyAndSell() {
             continue;
           }
           try {
+            // Estimate token amount for output
+            tokenAmount = await getTokenPrice(WETH_ADDRESS, tokenAddress, amountIn, fee, provider);
             txHash = await executeSwap(wallet, WETH_ADDRESS, tokenAddress, amountIn, fee, provider, true);
             console.log(`Random Buy tx hash ${COLORS.BRIGHT_CYAN}(Wallet ${wallets.indexOf(wallet)})${COLORS.RESET}: ${txHash}`);
+            console.log(`${COLORS.BRIGHT_GREEN}Bought ${tokenAmount} tokens${COLORS.RESET}`);
             success = true;
             break;
           } catch (error) {
@@ -718,7 +726,6 @@ async function automateBuyAndSell() {
         console.log(`Wallet (${wallet.address}) has no tokens to sell.`);
       } else if (!dryRun) {
         const randomSellPercent = minSellPercent + Math.random() * (maxSellPercent - minSellPercent);
-        // Use BigInt arithmetic directly
         const amountToSell = (balance * BigInt(Math.round(randomSellPercent * 100))) / 10000n;
 
         try {
@@ -783,7 +790,6 @@ async function automateBuyAndSell() {
   console.log('Automation stopped.');
   rl.removeAllListeners('line');
 }
-
 async function sendAllETHFromAllWallets() {
   const recipient = await askQuestion('Enter recipient wallet address to send all ETH: ');
   if (!ethers.isAddress(recipient)) {
