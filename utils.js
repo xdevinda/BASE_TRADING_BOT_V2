@@ -58,10 +58,16 @@ async function getTokenPrice(tokenIn, tokenOut, amountIn, fee, provider) {
   const quoterInterface = new ethers.Interface([
     'function quoteExactInputSingle(address tokenIn, address tokenOut, uint24 fee, uint256 amountIn, uint160 sqrtPriceLimitX96) external view returns (uint256 amountOut)',
   ]);
-  const quoter = new ethers.Contract(QUOTER_ADDRESS, quoterInterface, provider);
-  console.log(`Calling Quoter at ${QUOTER_ADDRESS} with tokenIn: ${tokenIn}, tokenOut: ${tokenOut}, fee: ${fee}`);
+  const quoter = new ethers.Contract(QUOTER_ADDRESS.toLowerCase(), quoterInterface, provider);
+  console.log(`Calling Quoter at ${QUOTER_ADDRESS.toLowerCase()} with tokenIn: ${tokenIn}, tokenOut: ${tokenOut}, fee: ${fee}`);
   try {
-    const amountOut = await quoter.quoteExactInputSingle(tokenIn, tokenOut, fee, amountIn, 0);
+    const amountOut = await quoter.quoteExactInputSingle({
+      tokenIn: tokenIn.toLowerCase(),
+      tokenOut: tokenOut.toLowerCase(),
+      fee,
+      amountIn,
+      sqrtPriceLimitX96: 0,
+    });
     const decimalsOut = (await getTokenDetails(tokenOut, tokenOut, provider)).decimals;
     return ethers.formatUnits(amountOut, decimalsOut);
   } catch (error) {
