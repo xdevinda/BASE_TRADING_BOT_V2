@@ -1,5 +1,5 @@
 require('dotenv').config();
-const ethers = require('ethers');
+const { ethers } = require('ethers');
 const readline = require('readline');
 const {
   COLORS,
@@ -19,7 +19,7 @@ const {
 } = require('./utils');
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-const factoryInterface = new ethers.utils.Interface(['function getPool(address tokenA, address tokenB, uint24 fee) external view returns (address pool)']);
+const factoryInterface = new ethers.Interface(['function getPool(address tokenA, address tokenB, uint24 fee) external view returns (address pool)']);
 const factory = new ethers.Contract(FACTORY_ADDRESS, factoryInterface, provider);
 const dryRun = process.argv.includes('--dry-run');
 
@@ -38,7 +38,7 @@ async function initializeWallets() {
     process.exit(1);
   }
   try {
-    ethers.Wallet.fromMnemonic(process.env.MNEMONIC);
+    ethers.Wallet.fromPhrase(process.env.MNEMONIC); // v6 uses fromPhrase instead of fromMnemonic
   } catch (error) {
     console.error('Error: Invalid MNEMONIC in .env file:', error.message);
     process.exit(1);
@@ -54,19 +54,19 @@ async function initializeWallets() {
 
   for (let i = 0; i < numWallets; i++) {
     const path = `m/44'/60'/0'/0/${i}`;
-    const derivedWallet = ethers.Wallet.fromMnemonic(process.env.MNEMONIC, path).connect(provider);
+    const derivedWallet = ethers.Wallet.fromPhrase(process.env.MNEMONIC, path).connect(provider);
     wallets.push(derivedWallet);
     console.log(`Wallet ${i} address: ${derivedWallet.address}`);
   }
 
   const mainWalletBalance = await provider.getBalance(wallets[0].address);
-  console.log(`${COLORS.BRIGHT_GREEN}\nMain Wallet (BIP-44 #0) Address: ${wallets[0].address} - Balance: ${ethers.utils.formatEther(mainWalletBalance)} ETH${COLORS.RESET}`);
+  console.log(`${COLORS.BRIGHT_GREEN}\nMain Wallet (BIP-44 #0) Address: ${wallets[0].address} - Balance: ${ethers.formatEther(mainWalletBalance)} ETH${COLORS.RESET}`);
 }
 
 async function buyToken() {
   const tokenAddress = await askQuestion('Enter token address to buy: ');
   const ethAmount = await askQuestion('Enter ETH amount to spend: ');
-  const amountIn = ethers.utils.parseEther(ethAmount);
+  const amountIn = ethers.parseEther(ethAmount);
 
   const tokenDetailsBefore = await getTokenDetails(tokenAddress, wallets[0].address);
   if (tokenDetailsBefore.error) {
@@ -91,7 +91,7 @@ async function buyToken() {
   for (const fee of FEE_TIERS) {
     const [token0, token1] = sortTokens(WETH_ADDRESS, tokenAddress);
     const poolAddress = await factory.getPool(token0, token1, fee);
-    if (poolAddress === ethers.constants.AddressZero) {
+    if (poolAddress === ethers.ZeroAddress) {
       console.log(`No pool exists for fee tier ${fee}. Trying next tier...`);
       continue;
     }
@@ -101,7 +101,7 @@ async function buyToken() {
       success = true;
       break;
     } catch (error) {
-      console.log(`Fee tier ${fee} failed. Trying next tier...`);
+      console.log(`Fee tier ${fee} failed. Trying next tier...`, error.message);
     }
   }
   if (!success) {
@@ -129,7 +129,7 @@ async function sellTokens() {
     wallets[0]
   );
   const balance = await tokenContract.balanceOf(wallets[0].address);
-  if (balance.isZero()) {
+  if (balance === 0n) {
     console.log('No tokens to sell (Main Wallet, BIP-44 #0).');
     return;
   }
@@ -139,7 +139,7 @@ async function sellTokens() {
     console.log('Invalid percentage. Please enter a number between 0 and 100.');
     return;
   }
-  const amountToSell = balance.mul(ethers.BigNumber.from(Math.round(percentage * 100))).div(10000);
+  const amountToSell = (balance * BigInt(Math.round(percentage * 100))) / 10000n;
 
   const tokenDetailsBefore = await getTokenDetails(tokenAddress, wallets[0].address);
   if (tokenDetailsBefore.error) {
@@ -148,7 +148,7 @@ async function sellTokens() {
   }
   console.log(`${COLORS.BRIGHT_RED}\n--- Token Details Before Sale ---${COLORS.RESET}`, tokenDetailsBefore);
 
-  const confirm = await askQuestion(`Confirm selling ${ethers.utils.formatUnits(amountToSell, tokenDetailsBefore.decimals)} ${tokenDetailsBefore.symbol} (${percentage}%)? (y/n): `);
+  const confirm = await askQuestion(`Confirm selling ${ethers.formatUnits(amountToSell, tokenDetailsBefore.decimals)} ${tokenDetailsBefore.symbol} (${percentage}%)? (y/n): `);
   if (confirm.toLowerCase() !== 'y') {
     console.log('Transaction cancelled.');
     return;
@@ -160,7 +160,7 @@ async function sellTokens() {
   }
 
   const allowance = await tokenContract.allowance(wallets[0].address, SWAP_ROUTER_ADDRESS);
-  if (allowance.lt(amountToSell)) {
+  if (allowance < amountToSell) {
     const gasPrice = await getSafeGasPrice();
     const approveTx = await tokenContract.approve(SWAP_ROUTER_ADDRESS, amountToSell, { gasPrice });
     await approveTx.wait();
@@ -171,7 +171,7 @@ async function sellTokens() {
   for (const fee of FEE_TIERS) {
     const [token0, token1] = sortTokens(tokenAddress, WETH_ADDRESS);
     const poolAddress = await factory.getPool(token0, token1, fee);
-    if (poolAddress === ethers.constants.AddressZero) {
+    if (poolAddress === ethers.ZeroAddress) {
       console.log(`No pool exists for fee tier ${fee}. Trying next tier...`);
       continue;
     }
@@ -181,7 +181,7 @@ async function sellTokens() {
 
       const wethContract = new ethers.Contract(WETH_ADDRESS, ['function withdraw(uint256 amount)'], wallets[0]);
       const wethBalance = await wethContract.balanceOf(wallets[0].address);
-      if (wethBalance.gt(0)) {
+      if (wethBalance > 0n) {
         const gasPrice = await getSafeGasPrice();
         await wethContract.withdraw(wethBalance, { gasPrice });
         console.log('WETH withdrawn to ETH (Main Wallet, BIP-44 #0)');
@@ -189,7 +189,7 @@ async function sellTokens() {
       success = true;
       break;
     } catch (error) {
-      console.log(`Fee tier ${fee} failed. Trying next tier...`);
+      console.log(`Fee tier ${fee} failed. Trying next tier...`, error.message);
     }
   }
   if (!success) {
@@ -205,24 +205,24 @@ async function sellTokens() {
 
 async function sendAllETH() {
   const recipient = await askQuestion('Enter recipient wallet address: ');
-  if (!ethers.utils.isAddress(recipient)) {
+  if (!ethers.isAddress(recipient)) {
     console.log('Invalid address.');
     return;
   }
 
   const balance = await provider.getBalance(wallets[0].address);
   const gasPrice = await getSafeGasPrice();
-  const gasLimit = ethers.BigNumber.from(21000);
-  const gasBuffer = ethers.utils.parseEther('0.0001');
-  const totalCost = gasPrice.mul(gasLimit).add(gasBuffer);
-  const amountToSend = balance.sub(totalCost);
+  const gasLimit = 21000n;
+  const gasBuffer = ethers.parseEther('0.0001');
+  const totalCost = gasPrice * gasLimit + gasBuffer;
+  const amountToSend = balance - totalCost;
 
-  if (amountToSend.lte(0)) {
-    console.log(`Insufficient ETH: ${ethers.utils.formatEther(balance)} ETH`);
+  if (amountToSend <= 0n) {
+    console.log(`Insufficient ETH: ${ethers.formatEther(balance)} ETH`);
     return;
   }
 
-  const confirm = await askQuestion(`Confirm sending ${ethers.utils.formatEther(amountToSend)} ETH? (y/n): `);
+  const confirm = await askQuestion(`Confirm sending ${ethers.formatEther(amountToSend)} ETH? (y/n): `);
   if (confirm.toLowerCase() !== 'y') return;
 
   if (dryRun) {
@@ -238,13 +238,13 @@ async function sendAllETH() {
 
 async function sendToken() {
   const tokenAddress = await askQuestion('Enter token address to send: ');
-  if (!ethers.utils.isAddress(tokenAddress)) {
+  if (!ethers.isAddress(tokenAddress)) {
     console.log('Invalid token address.');
     return;
   }
 
   const recipient = await askQuestion('Enter recipient wallet address: ');
-  if (!ethers.utils.isAddress(recipient)) {
+  if (!ethers.isAddress(recipient)) {
     console.log('Invalid recipient address.');
     return;
   }
@@ -261,14 +261,14 @@ async function sendToken() {
   );
 
   const balance = await tokenContract.balanceOf(wallets[0].address);
-  if (balance.isZero()) {
+  if (balance === 0n) {
     console.log('No tokens to send.');
     return;
   }
 
   const decimals = await tokenContract.decimals();
   const symbol = await tokenContract.symbol();
-  console.log(`Main Wallet ${symbol} Balance: ${ethers.utils.formatUnits(balance, decimals)} ${symbol}`);
+  console.log(`Main Wallet ${symbol} Balance: ${ethers.formatUnits(balance, decimals)} ${symbol}`);
 
   const percentageStr = await askQuestion('Enter percentage of tokens to send (0-100): ');
   const percentage = parseFloat(percentageStr);
@@ -277,13 +277,13 @@ async function sendToken() {
     return;
   }
 
-  const amount = balance.mul(ethers.BigNumber.from(Math.round(percentage * 100))).div(10000);
-  if (amount.isZero()) {
+  const amount = (balance * BigInt(Math.round(percentage * 100))) / 10000n;
+  if (amount === 0n) {
     console.log('Calculated amount to send is 0.');
     return;
   }
 
-  const formattedAmount = ethers.utils.formatUnits(amount, decimals);
+  const formattedAmount = ethers.formatUnits(amount, decimals);
   const confirm = await askQuestion(`Confirm sending ${formattedAmount} ${symbol} (${percentage}%)? (y/n): `);
   if (confirm.toLowerCase() !== 'y') return;
 
@@ -307,7 +307,7 @@ async function showWalletBalances() {
     const balances = await Promise.all(
       wallets.map(async (wallet, i) => {
         const balance = await provider.getBalance(wallet.address);
-        return `Wallet ${i} address: ${wallet.address} -${COLORS.BRIGHT_BLUE} ETH Balance: ${ethers.utils.formatEther(balance)} ETH${COLORS.RESET}`;
+        return `Wallet ${i} address: ${wallet.address} -${COLORS.BRIGHT_BLUE} ETH Balance: ${ethers.formatEther(balance)} ETH${COLORS.RESET}`;
       })
     );
     console.log(balances.join('\n'));
@@ -331,7 +331,7 @@ async function showWalletBalances() {
 
 async function buyWithMultipleWallets() {
   const tokenAddress = await askQuestion('Enter token address to buy: ');
-  if (!ethers.utils.isAddress(tokenAddress)) {
+  if (!ethers.isAddress(tokenAddress)) {
     console.log('Invalid token address.');
     return;
   }
@@ -349,11 +349,11 @@ async function buyWithMultipleWallets() {
   for (let i = 0; i < wallets.length; i++) {
     const wallet = wallets[i];
     const randomEth = minEth + Math.random() * (maxEth - minEth);
-    const amountIn = ethers.utils.parseEther(randomEth.toFixed(6).toString());
+    const amountIn = ethers.parseEther(randomEth.toFixed(6).toString());
     const balance = await provider.getBalance(wallet.address);
 
-    if (balance.lt(amountIn.add((await getSafeGasPrice()).mul(50000)))) {
-      console.log(`Wallet ${i} (${wallet.address}) has insufficient ETH: ${ethers.utils.formatEther(balance)}`);
+    if (balance < amountIn + ((await getSafeGasPrice()) * 50000n)) {
+      console.log(`Wallet ${i} (${wallet.address}) has insufficient ETH: ${ethers.formatEther(balance)}`);
       continue;
     }
 
@@ -371,14 +371,14 @@ async function buyWithMultipleWallets() {
     for (const fee of FEE_TIERS) {
       const [token0, token1] = sortTokens(WETH_ADDRESS, tokenAddress);
       const poolAddress = await factory.getPool(token0, token1, fee);
-      if (poolAddress === ethers.constants.AddressZero) continue;
+      if (poolAddress === ethers.ZeroAddress) continue;
       try {
         txHash = await executeSwap(wallet, WETH_ADDRESS, tokenAddress, amountIn, fee, true);
         console.log(`Wallet ${i} transaction hash: ${txHash}`);
         success = true;
         break;
       } catch (error) {
-        console.log(`Fee tier ${fee} failed for Wallet ${i}.`);
+        console.log(`Fee tier ${fee} failed for Wallet ${i}:`, error.message);
       }
     }
     if (!success) continue;
@@ -392,7 +392,7 @@ async function buyWithMultipleWallets() {
 
 async function buyWithWalletsDelayed() {
   const tokenAddress = await askQuestion('Enter token address to buy: ');
-  if (!ethers.utils.isAddress(tokenAddress)) {
+  if (!ethers.isAddress(tokenAddress)) {
     console.log('Invalid token address.');
     return;
   }
@@ -419,11 +419,11 @@ async function buyWithWalletsDelayed() {
   for (let i = 0; i < wallets.length; i++) {
     const wallet = wallets[i];
     const randomEth = minEth + Math.random() * (maxEth - minEth);
-    const amountIn = ethers.utils.parseEther(randomEth.toFixed(6).toString());
+    const amountIn = ethers.parseEther(randomEth.toFixed(6).toString());
     const balance = await provider.getBalance(wallet.address);
 
-    if (balance.lt(amountIn.add((await getSafeGasPrice()).mul(50000)))) {
-      console.log(`Wallet ${i} (${wallet.address}) has insufficient ETH: ${ethers.utils.formatEther(balance)}`);
+    if (balance < amountIn + ((await getSafeGasPrice()) * 50000n)) {
+      console.log(`Wallet ${i} (${wallet.address}) has insufficient ETH: ${ethers.formatEther(balance)}`);
       continue;
     }
 
@@ -441,14 +441,14 @@ async function buyWithWalletsDelayed() {
     for (const fee of FEE_TIERS) {
       const [token0, token1] = sortTokens(WETH_ADDRESS, tokenAddress);
       const poolAddress = await factory.getPool(token0, token1, fee);
-      if (poolAddress === ethers.constants.AddressZero) continue;
+      if (poolAddress === ethers.ZeroAddress) continue;
       try {
         txHash = await executeSwap(wallet, WETH_ADDRESS, tokenAddress, amountIn, fee, true);
         console.log(`Wallet ${i} transaction hash: ${txHash}`);
         success = true;
         break;
       } catch (error) {
-        console.log(`Fee tier ${fee} failed for Wallet ${i}.`);
+        console.log(`Fee tier ${fee} failed for Wallet ${i}:`, error.message);
       }
     }
     if (!success) continue;
@@ -468,7 +468,7 @@ async function buyWithWalletsDelayed() {
 
 async function sellAllTokensFromAllWallets() {
   const tokenAddress = await askQuestion('Enter token address to sell from all wallets: ');
-  if (!ethers.utils.isAddress(tokenAddress)) {
+  if (!ethers.isAddress(tokenAddress)) {
     console.log('Invalid token address.');
     return;
   }
@@ -493,12 +493,12 @@ async function sellAllTokensFromAllWallets() {
     );
 
     const balance = await tokenContract.balanceOf(wallet.address);
-    if (balance.isZero()) {
+    if (balance === 0n) {
       console.log(`Wallet ${i} (${wallet.address}) has no tokens to sell.`);
       continue;
     }
 
-    const amountToSell = balance.mul(ethers.BigNumber.from(Math.round(percentage * 100))).div(10000);
+    const amountToSell = (balance * BigInt(Math.round(percentage * 100))) / 10000n;
     const tokenDetailsBefore = await getTokenDetails(tokenAddress, wallet.address);
     if (tokenDetailsBefore.error) continue;
     console.log(`${COLORS.BRIGHT_RED}\n--- Token Details Before Sale (Wallet ${i}) ---${COLORS.RESET}`, tokenDetailsBefore);
@@ -509,7 +509,7 @@ async function sellAllTokensFromAllWallets() {
     }
 
     const allowance = await tokenContract.allowance(wallet.address, SWAP_ROUTER_ADDRESS);
-    if (allowance.lt(amountToSell)) {
+    if (allowance < amountToSell) {
       const gasPrice = await getSafeGasPrice();
       const approveTx = await tokenContract.approve(SWAP_ROUTER_ADDRESS, amountToSell, { gasPrice });
       await approveTx.wait();
@@ -520,22 +520,22 @@ async function sellAllTokensFromAllWallets() {
     for (const fee of FEE_TIERS) {
       const [token0, token1] = sortTokens(tokenAddress, WETH_ADDRESS);
       const poolAddress = await factory.getPool(token0, token1, fee);
-      if (poolAddress === ethers.constants.AddressZero) continue;
+      if (poolAddress === ethers.ZeroAddress) continue;
       try {
         txHash = await executeSwap(wallet, tokenAddress, WETH_ADDRESS, amountToSell, fee, false);
         console.log(`Wallet ${i} transaction hash: ${txHash}`);
 
         const wethContract = new ethers.Contract(WETH_ADDRESS, ['function withdraw(uint256 amount)'], wallet);
         const wethBalance = await wethContract.balanceOf(wallet.address);
-        if (wethBalance.gt(0)) {
+        if (wethBalance > 0n) {
           const gasPrice = await getSafeGasPrice();
           await wethContract.withdraw(wethBalance, { gasPrice });
-          console.log(`Wallet ${i} withdrew ${ethers.utils.formatEther(wethBalance)} ETH from WETH`);
+          console.log(`Wallet ${i} withdrew ${ethers.formatEther(wethBalance)} ETH from WETH`);
         }
         success = true;
         break;
       } catch (error) {
-        console.log(`Fee tier ${fee} failed for Wallet ${i}.`);
+        console.log(`Fee tier ${fee} failed for Wallet ${i}:`, error.message);
       }
     }
     if (!success) continue;
@@ -549,7 +549,7 @@ async function sellAllTokensFromAllWallets() {
 
 async function automateBuyAndSell() {
   const tokenAddress = await askQuestion('Enter token address to buy and sell: ');
-  if (!ethers.utils.isAddress(tokenAddress)) {
+  if (!ethers.isAddress(tokenAddress)) {
     console.log('Invalid token address.');
     return;
   }
@@ -591,11 +591,11 @@ async function automateBuyAndSell() {
   for (let i = 0; i < wallets.length && !shouldStop; i++) {
     const wallet = wallets[i];
     const randomEth = minEth + Math.random() * (maxEth - minEth);
-    const amountIn = ethers.utils.parseEther(randomEth.toFixed(6).toString());
+    const amountIn = ethers.parseEther(randomEth.toFixed(6).toString());
     const ethBalance = await provider.getBalance(wallet.address);
 
-    if (ethBalance.lt(amountIn.add((await getSafeGasPrice()).mul(50000)))) {
-      console.log(`${COLORS.BRIGHT_YELLOW}Wallet ${i} has insufficient ETH: ${ethers.utils.formatEther(ethBalance)}${COLORS.RESET}`);
+    if (ethBalance < amountIn + ((await getSafeGasPrice()) * 50000n)) {
+      console.log(`${COLORS.BRIGHT_YELLOW}Wallet ${i} has insufficient ETH: ${ethers.formatEther(ethBalance)}${COLORS.RESET}`);
       continue;
     }
 
@@ -609,15 +609,20 @@ async function automateBuyAndSell() {
     for (const fee of FEE_TIERS) {
       const [token0, token1] = sortTokens(WETH_ADDRESS, tokenAddress);
       const poolAddress = await factory.getPool(token0, token1, fee);
-      if (poolAddress === ethers.constants.AddressZero) continue;
+      if (poolAddress === ethers.ZeroAddress) continue;
       try {
         txHash = await executeSwap(wallet, WETH_ADDRESS, tokenAddress, amountIn, fee, true);
         console.log(`Initial Buy tx hash ${COLORS.BRIGHT_CYAN}(Wallet ${i})${COLORS.RESET}: ${txHash}`);
         success = true;
         break;
-      } catch (error) {}
+      } catch (error) {
+        console.log(`Initial buy failed for Wallet ${i} with fee ${fee}:`, error.message);
+      }
     }
-    if (!success) continue;
+    if (!success) {
+      console.log(`Initial buy failed for Wallet ${i}: No suitable fee tier.`);
+      continue;
+    }
 
     if (i < wallets.length - 1) {
       const randomDelay = minDelay + Math.random() * (maxDelay - minDelay);
@@ -632,31 +637,33 @@ async function automateBuyAndSell() {
 
     if (isBuy) {
       const randomEth = minEth + Math.random() * (maxEth - minEth);
-      const amountIn = ethers.utils.parseEther(randomEth.toFixed(6).toString());
+      const amountIn = ethers.parseEther(randomEth.toFixed(6).toString());
       const ethBalance = await provider.getBalance(wallet.address);
 
-      if (ethBalance.lt(amountIn.add((await getSafeGasPrice()).mul(50000)))) {
-        console.log(`${COLORS.BRIGHT_YELLOW}Wallet has insufficient ETH: ${ethers.utils.formatEther(ethBalance)}${COLORS.RESET}`);
-        continue;
-      }
-
-      if (dryRun) {
+      if (ethBalance < amountIn + ((await getSafeGasPrice()) * 50000n)) {
+        console.log(`${COLORS.BRIGHT_YELLOW}Wallet has insufficient ETH: ${ethers.formatEther(ethBalance)}${COLORS.RESET}`);
+      } else if (!dryRun) {
+        let txHash;
+        let success = false;
+        for (const fee of FEE_TIERS) {
+          const [token0, token1] = sortTokens(WETH_ADDRESS, tokenAddress);
+          const poolAddress = await factory.getPool(token0, token1, fee);
+          if (poolAddress === ethers.ZeroAddress) {
+            console.log(`No pool exists for fee tier ${fee}.`);
+            continue;
+          }
+          try {
+            txHash = await executeSwap(wallet, WETH_ADDRESS, tokenAddress, amountIn, fee, true);
+            console.log(`Random Buy tx hash ${COLORS.BRIGHT_CYAN}(Wallet ${wallets.indexOf(wallet)})${COLORS.RESET}: ${txHash}`);
+            success = true;
+            break;
+          } catch (error) {
+            console.log(`Random buy failed with fee ${fee}:`, error.message);
+          }
+        }
+        if (!success) console.log('Random buy failed: No suitable fee tier.');
+      } else {
         console.log(`Dry run: Simulating random buy...`);
-        continue;
-      }
-
-      let txHash;
-      let success = false;
-      for (const fee of FEE_TIERS) {
-        const [token0, token1] = sortTokens(WETH_ADDRESS, tokenAddress);
-        const poolAddress = await factory.getPool(token0, token1, fee);
-        if (poolAddress === ethers.constants.AddressZero) continue;
-        try {
-          txHash = await executeSwap(wallet, WETH_ADDRESS, tokenAddress, amountIn, fee, true);
-          console.log(`Random Buy tx hash ${COLORS.BRIGHT_CYAN}(Wallet ${wallets.indexOf(wallet)})${COLORS.RESET}: ${txHash}`);
-          success = true;
-          break;
-        } catch (error) {}
       }
     } else {
       const tokenContract = new ethers.Contract(
@@ -665,51 +672,67 @@ async function automateBuyAndSell() {
           'function balanceOf(address) view returns (uint256)',
           'function approve(address spender, uint256 amount) public returns (bool)',
           'function decimals() view returns (uint8)',
+          'function allowance(address owner, address spender) view returns (uint256)',
         ],
         wallet
       );
 
       const balance = await tokenContract.balanceOf(wallet.address);
-      if (balance.isZero()) {
+      if (balance === 0n) {
         console.log(`Wallet (${wallet.address}) has no tokens to sell.`);
-        continue;
-      }
+      } else if (!dryRun) {
+        const randomSellPercent = minSellPercent + Math.random() * (maxSellPercent - minSellPercent);
+        const amountToSell = (balance * BigInt(Math.round(randomSellPercent * 100))) / 10000n;
 
-      const randomSellPercent = minSellPercent + Math.random() * (maxSellPercent - minSellPercent);
-      const amountToSell = balance.mul(ethers.BigNumber.from(Math.round(randomSellPercent * 100))).div(10000);
-
-      if (dryRun) {
-        console.log(`Dry run: Simulating sell...`);
-        continue;
-      }
-
-      const allowance = await tokenContract.allowance(wallet.address, SWAP_ROUTER_ADDRESS);
-      if (allowance.lt(amountToSell)) {
-        const gasPrice = await getSafeGasPrice();
-        const approveTx = await tokenContract.approve(SWAP_ROUTER_ADDRESS, amountToSell, { gasPrice });
-        await approveTx.wait();
-      }
-
-      let txHash;
-      let success = false;
-      for (const fee of FEE_TIERS) {
-        const [token0, token1] = sortTokens(tokenAddress, WETH_ADDRESS);
-        const poolAddress = await factory.getPool(token0, token1, fee);
-        if (poolAddress === ethers.constants.AddressZero) continue;
         try {
-          txHash = await executeSwap(wallet, tokenAddress, WETH_ADDRESS, amountToSell, fee, false);
-          console.log(`Sell tx hash ${COLORS.BRIGHT_CYAN}(Wallet ${wallets.indexOf(wallet)})${COLORS.RESET}: ${txHash}`);
-
-          const wethContract = new ethers.Contract(WETH_ADDRESS, ['function withdraw(uint256 amount)'], wallet);
-          const wethBalance = await wethContract.balanceOf(wallet.address);
-          if (wethBalance.gt(0)) {
+          const allowance = await tokenContract.allowance(wallet.address, SWAP_ROUTER_ADDRESS);
+          if (allowance < amountToSell) {
             const gasPrice = await getSafeGasPrice();
-            await wethContract.withdraw(wethBalance, { gasPrice });
-            console.log(`Withdrew ${ethers.utils.formatEther(wethBalance)} ETH from WETH`);
+            const approveTx = await tokenContract.approve(SWAP_ROUTER_ADDRESS, amountToSell, { gasPrice });
+            await approveTx.wait();
+            console.log(`Approved ${ethers.formatUnits(amountToSell, await tokenContract.decimals())} tokens for Wallet ${wallets.indexOf(wallet)}`);
           }
-          success = true;
-          break;
-        } catch (error) {}
+
+          let txHash;
+          let success = false;
+          for (const fee of FEE_TIERS) {
+            const [token0, token1] = sortTokens(tokenAddress, WETH_ADDRESS);
+            const poolAddress = await factory.getPool(token0, token1, fee);
+            if (poolAddress === ethers.ZeroAddress) {
+              console.log(`No pool exists for fee tier ${fee}.`);
+              continue;
+            }
+            try {
+              txHash = await executeSwap(wallet, tokenAddress, WETH_ADDRESS, amountToSell, fee, false);
+              console.log(`Sell tx hash ${COLORS.BRIGHT_CYAN}(Wallet ${wallets.indexOf(wallet)})${COLORS.RESET}: ${txHash}`);
+
+              const wethContract = new ethers.Contract(
+                WETH_ADDRESS,
+                [
+                  'function balanceOf(address) view returns (uint256)',
+                  'function withdraw(uint256 amount)',
+                ],
+                wallet
+              );
+              const wethBalance = await wethContract.balanceOf(wallet.address);
+              if (wethBalance > 0n) {
+                const gasPrice = await getSafeGasPrice();
+                await wethContract.withdraw(wethBalance, { gasPrice });
+                console.log(`Withdrew ${ethers.formatEther(wethBalance)} ETH from WETH`);
+              }
+              console.log(`${COLORS.BRIGHT_RED}Sold ${ethers.formatUnits(amountToSell, await tokenContract.decimals())} tokens (${randomSellPercent.toFixed(2)}%)${COLORS.RESET}`);
+              success = true;
+              break;
+            } catch (error) {
+              console.log(`Sell failed with fee ${fee}:`, error.message);
+            }
+          }
+          if (!success) console.log('Sell failed: No suitable fee tier.');
+        } catch (error) {
+          console.log(`Error during sell operation:`, error.message);
+        }
+      } else {
+        console.log(`Dry run: Simulating sell...`);
       }
     }
 
@@ -726,23 +749,23 @@ async function automateBuyAndSell() {
 
 async function sendAllETHFromAllWallets() {
   const recipient = await askQuestion('Enter recipient wallet address to send all ETH: ');
-  if (!ethers.utils.isAddress(recipient)) {
+  if (!ethers.isAddress(recipient)) {
     console.log('Invalid recipient address.');
     return;
   }
 
   const gasPrice = await getSafeGasPrice();
-  const gasLimit = ethers.BigNumber.from(21000);
-  const gasBuffer = ethers.utils.parseEther('0.0001');
+  const gasLimit = 21000n;
+  const gasBuffer = ethers.parseEther('0.0001');
 
   for (let i = 0; i < wallets.length; i++) {
     const wallet = wallets[i];
     const balance = await provider.getBalance(wallet.address);
-    const totalCost = gasPrice.mul(gasLimit).add(gasBuffer);
-    const amountToSend = balance.sub(totalCost);
+    const totalCost = gasPrice * gasLimit + gasBuffer;
+    const amountToSend = balance - totalCost;
 
-    if (amountToSend.lte(0)) {
-      console.log(`Wallet ${i} (${wallet.address}) has insufficient ETH: ${ethers.utils.formatEther(balance)} ETH`);
+    if (amountToSend <= 0n) {
+      console.log(`Wallet ${i} (${wallet.address}) has insufficient ETH: ${ethers.formatEther(balance)} ETH`);
       continue;
     }
 
@@ -760,13 +783,13 @@ async function sendAllETHFromAllWallets() {
 
 async function sendTokenFromAllWallets() {
   const tokenAddress = await askQuestion('Enter token address to send from all wallets: ');
-  if (!ethers.utils.isAddress(tokenAddress)) {
+  if (!ethers.isAddress(tokenAddress)) {
     console.log('Invalid token address.');
     return;
   }
 
   const recipient = await askQuestion('Enter recipient wallet address: ');
-  if (!ethers.utils.isAddress(recipient)) {
+  if (!ethers.isAddress(recipient)) {
     console.log('Invalid recipient address.');
     return;
   }
@@ -784,7 +807,7 @@ async function sendTokenFromAllWallets() {
     );
 
     const balance = await tokenContract.balanceOf(wallet.address);
-    if (balance.isZero()) {
+    if (balance === 0n) {
       console.log(`Wallet ${i} (${wallet.address}) has no tokens to send.`);
       continue;
     }
@@ -816,26 +839,26 @@ async function fundETHToWallets() {
   const mainWallet = wallets[0];
   const mainBalance = await provider.getBalance(mainWallet.address);
   const gasPrice = await getSafeGasPrice();
-  const gasLimit = ethers.BigNumber.from(21000);
+  const gasLimit = 21000n;
 
-  const totalGasCost = gasPrice.mul(gasLimit).mul(wallets.length - 1);
-  const availableBalance = mainBalance.sub(totalGasCost);
+  const totalGasCost = gasPrice * gasLimit * BigInt(wallets.length - 1);
+  const availableBalance = mainBalance - totalGasCost;
 
-  if (availableBalance.lte(0)) {
-    console.log(`Main Wallet has insufficient ETH: ${ethers.utils.formatEther(mainBalance)} ETH`);
+  if (availableBalance <= 0n) {
+    console.log(`Main Wallet has insufficient ETH: ${ethers.formatEther(mainBalance)} ETH`);
     return;
   }
 
   for (let i = 1; i < wallets.length; i++) {
     const wallet = wallets[i];
     const randomEth = minEth + Math.random() * (maxEth - minEth);
-    const amountToSend = ethers.utils.parseEther(randomEth.toFixed(6).toString());
+    const amountToSend = ethers.parseEther(randomEth.toFixed(6).toString());
 
     const remainingMainBalance = await provider.getBalance(mainWallet.address);
-    const gasCost = gasPrice.mul(gasLimit);
+    const gasCost = gasPrice * gasLimit;
 
-    if (remainingMainBalance.lt(amountToSend.add(gasCost))) {
-      console.log(`Main Wallet has insufficient ETH remaining: ${ethers.utils.formatEther(remainingMainBalance)} ETH`);
+    if (remainingMainBalance < amountToSend + gasCost) {
+      console.log(`Main Wallet has insufficient ETH remaining: ${ethers.formatEther(remainingMainBalance)} ETH`);
       break;
     }
 
@@ -856,12 +879,13 @@ async function start() {
 
   while (true) {
     const mainWalletBalance = await provider.getBalance(wallets[0].address);
-    const gasPrice = await provider.getGasPrice();
+    const feeData = await provider.getFeeData(); // Updated to v6
+    const gasPrice = feeData.gasPrice; // Extract gasPrice from feeData
     const blockNumber = await provider.getBlockNumber();
 
     console.log(`${COLORS.BRIGHT_CYAN}\n--- Menu ---${COLORS.RESET}`);
-    console.log(`Network: Base | Gas Price: ${ethers.utils.formatUnits(gasPrice, 'gwei')} gwei | Block: ${blockNumber}`);
-    console.log(`${COLORS.BRIGHT_GREEN}::Main Wallet:::(BALANCE: ${ethers.utils.formatEther(mainWalletBalance)} ETH)${COLORS.RESET}`);
+    console.log(`Network: Base | Gas Price: ${ethers.formatUnits(gasPrice, 'gwei')} gwei | Block: ${blockNumber}`);
+    console.log(`${COLORS.BRIGHT_GREEN}::Main Wallet:::(BALANCE: ${ethers.formatEther(mainWalletBalance)} ETH)${COLORS.RESET}`);
     console.log('(1). Buy Tokens');
     console.log('(2). Sell Tokens');
     console.log('(3). Send All ETH');
@@ -902,6 +926,7 @@ async function start() {
   }
 }
 
+// Update the start call at the bottom
 start().catch(error => {
   console.error('Unexpected error:', error);
   rl.close();
