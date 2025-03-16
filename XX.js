@@ -328,12 +328,12 @@ async function showWalletBalances() {
   console.log('\n--- Wallet Balances ---');
 
   if (tokenAddress.trim() === '') {
-    const balances = await Promise.all(
-      wallets.map(async (wallet, i) => {
-        const balance = await provider.getBalance(wallet.address);
-        return `Wallet ${i} address: ${wallet.address} -${COLORS.BRIGHT_BLUE} ETH Balance: ${ethers.formatEther(balance)} ETH${COLORS.RESET}`;
-      })
-    );
+    const balances = [];
+    for (let i = 0; i < wallets.length; i++) {
+      const wallet = wallets[i];
+      const balance = await provider.getBalance(wallet.address);
+      balances.push(`Wallet ${i} address: ${wallet.address} -${COLORS.BRIGHT_BLUE} ETH Balance: ${ethers.formatEther(balance)} ETH${COLORS.RESET}`);
+    }
     console.log(balances.join('\n'));
   } else {
     const tokenDetails = await getTokenDetails(tokenAddress, wallets[0].address, provider, true); // Force refresh
@@ -343,13 +343,13 @@ async function showWalletBalances() {
     }
     console.log('\n--- Token Details ---', tokenDetails);
 
-    const balances = await Promise.all(
-      wallets.map(async (wallet, i) => {
-        const details = await getTokenDetails(tokenAddress, wallet.address, provider, true); // Force refresh
-        const balance = details.error ? 'Error' : details.balance;
-        return `Wallet ${i} address: ${wallet.address} -${COLORS.BRIGHT_BLUE}${tokenDetails.symbol} Balance: ${balance} ${tokenDetails.symbol}${COLORS.RESET}`;
-      })
-    );
+    const balances = [];
+    for (let i = 0; i < wallets.length; i++) {
+      const wallet = wallets[i];
+      const details = await getTokenDetails(tokenAddress, wallet.address, provider, true); // Force refresh
+      const balance = details.error ? 'Error' : details.balance;
+      balances.push(`Wallet ${i} address: ${wallet.address} -${COLORS.BRIGHT_BLUE}${tokenDetails.symbol} Balance: ${balance} ${tokenDetails.symbol}${COLORS.RESET}`);
+    }
     console.log(balances.join('\n'));
   }
 }
