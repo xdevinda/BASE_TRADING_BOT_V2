@@ -12,9 +12,11 @@ const {
 
 const tokenDetailsCache = new Map();
 
-async function getTokenDetails(tokenAddress, walletAddress, provider) {
+async function getTokenDetails(tokenAddress, walletAddress, provider, forceRefresh = false) {
   const cacheKey = `${tokenAddress}-${walletAddress}`;
-  if (tokenDetailsCache.has(cacheKey)) return tokenDetailsCache.get(cacheKey);
+  if (forceRefresh) tokenDetailsCache.delete(cacheKey); // Clear cache if forced
+
+  if (tokenDetailsCache.has(cacheKey) && !forceRefresh) return tokenDetailsCache.get(cacheKey);
 
   if (!ethers.isAddress(tokenAddress)) return { error: 'Invalid token address' };
 
@@ -33,11 +35,11 @@ async function getTokenDetails(tokenAddress, walletAddress, provider) {
     );
 
     const [name, symbol, decimals, totalSupply, balance] = await Promise.all([
-      tokenContract.name().catch(() => 'Unknown'),
-      tokenContract.symbol().catch(() => 'Unknown'),
-      tokenContract.decimals().catch(() => 18),
-      tokenContract.totalSupply().catch(() => BigInt(0)),
-      tokenContract.balanceOf(walletAddress).catch(() => BigInt(0)),
+      tokenContract.name().catch((e) => { console.log(`Name fetch failed: ${e.message}`); return 'Unknown'; }),
+      tokenContract.symbol().catch((e) => { console.log(`Symbol fetch failed: ${e.message}`); return 'Unknown'; }),
+      tokenContract.decimals().catch((e) => { console.log(`Decimals fetch failed: ${e.message}`); return 18; }),
+      tokenContract.totalSupply().catch((e) => { console.log(`TotalSupply fetch failed: ${e.message}`); return BigInt(0); }),
+      tokenContract.balanceOf(walletAddress).catch((e) => { console.log(`Balance fetch failed for ${walletAddress}: ${e.message}`); return BigInt(0); }),
     ]);
 
     const details = {
@@ -50,13 +52,13 @@ async function getTokenDetails(tokenAddress, walletAddress, provider) {
     tokenDetailsCache.set(cacheKey, details);
     return details;
   } catch (error) {
+    console.log(`Error in getTokenDetails for ${tokenAddress}: ${error.message}`);
     return { error: error.message };
   }
 }
 
 async function getTokenPrice(tokenIn, tokenOut, amountIn, fee, provider) {
   const quoterInterface = new ethers.Interface([
-    // QuoterV2 ABI for Base
     'function quoteExactInputSingle(tuple(address tokenIn, address tokenOut, uint256 amountIn, uint24 fee, uint160 sqrtPriceLimitX96) calldata params) external view returns (uint256 amountOut, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)',
   ]);
   const quoter = new ethers.Contract(QUOTER_ADDRESS, quoterInterface, provider);
@@ -86,7 +88,7 @@ async function executeSwap(wallet, tokenIn, tokenOut, amountIn, fee, provider, i
         (await getTokenDetails(tokenOut, wallet.address, provider)).decimals
       );
     } catch (error) {
-      amountOutMin = 0n; // Fallback without logging
+      amountOutMin = 0n;
     }
   }
 
