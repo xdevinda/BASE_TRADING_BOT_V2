@@ -1,25 +1,136 @@
-require('dotenv').config();
 const { ethers } = require('ethers');
 const readline = require('readline');
-const {
-  COLORS,
-  FACTORY_ADDRESS,
-  SWAP_ROUTER_ADDRESS,
-  WETH_ADDRESS,
-  FEE_TIERS,
-} = require('./constants');
-const {
-  getTokenDetails,
-  getTokenPrice,
-  executeSwap,
-  getSafeGasPrice,
-  sortTokens,
-  withErrorHandling,
-} = require('./utils');
+require('dotenv').config();
 
-// Define provider in index.js
+// Constants
+const FACTORY_ADDRESS = '0x33128a8fC17869897dcE68Ed026d694621f6FDfD';
+const SWAP_ROUTER_ADDRESS = '0x2626664c2603336E57B271c5C0b26F421741e481';
+const QUOTER_ADDRESS = '0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a';
+const WETH_ADDRESS = '0x4200000000000000000000000000000000000006';
+const FEE_TIERS = [500, 3000, 10000];
+const MAX_GAS_PRICE = ethers.parseUnits('100', 'gwei');
+const DEFAULT_SLIPPAGE = 0.005;
+const COLORS = {
+  BRIGHT_RED: '\x1b[91m',
+  BRIGHT_GREEN: '\x1b[92m',
+  BRIGHT_BLUE: '\x1b[94m',
+  BRIGHT_CYAN: '\x1b[96m',
+  BRIGHT_YELLOW: '\x1b[93m',
+  RESET: '\x1b[0m',
+};
+
+// Utils
+const tokenDetailsCache = new Map();
+
+async function getTokenDetails(tokenAddress, walletAddress, provider, forceRefresh = false) {
+  const cacheKey = `${tokenAddress}-${walletAddress}`;
+  if (forceRefresh) tokenDetailsCache.delete(cacheKey);
+
+  if (tokenDetailsCache.has(cacheKey) && !forceRefresh) return tokenDetailsCache.get(cacheKey);
+
+  if (!ethers.isAddress(tokenAddress)) return { error: 'Invalid token address' };
+
+  try {
+    const tokenContract = new ethers.Contract(
+      tokenAddress,
+      [
+        'function name() view returns (string)',
+        'function symbol() view returns (string)',
+        'function decimals() view returns (uint8)',
+        'function totalSupply() view returns (uint256)',
+        'function balanceOf(address) view returns (uint256)',
+        'function allowance(address owner, address spender) view returns (uint256)',
+      ],
+      provider
+    );
+
+    const name = await tokenContract.name().catch((e) => { console.log(`Name fetch failed: ${e.message}`); return 'Unknown'; });
+    const symbol = await tokenContract.symbol().catch((e) => { console.log(`Symbol fetch failed: ${e.message}`); return 'Unknown'; });
+    const decimals = await tokenContract.decimals().catch((e) => { console.log(`Decimals fetch failed: ${e.message}`); return 18; });
+    const totalSupply = await tokenContract.totalSupply().catch((e) => { console.log(`TotalSupply fetch failed: ${e.message}`); return BigInt(0); });
+    const balance = await tokenContract.balanceOf(walletAddress).catch((e) => { console.log(`Balance fetch failed for ${walletAddress}: ${e.message}`); return BigInt(0); });
+
+    const details = {
+      name,
+      symbol,
+      decimals,
+      totalSupply: ethers.formatUnits(totalSupply, decimals),
+      balance: ethers.formatUnits(balance, decimals),
+    };
+    tokenDetailsCache.set(cacheKey, details);
+    return details;
+  } catch (error) {
+    console.log(`Error in getTokenDetails for ${tokenAddress}: ${error.message}`);
+    return { error: error.message };
+  }
+}
+
+async function getTokenPrice(tokenIn, tokenOut, amountIn, fee, provider) {
+  const quoterInterface = new ethers.Interface([
+    'function quoteExactInputSingle(tuple(address tokenIn, address tokenOut, uint256 amountIn, uint24 fee, uint160 sqrtPriceLimitX96) calldata params) external view returns (uint256 amountOut, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)',
+  ]);
+  const quoter = new ethers.Contract(QUOTER_ADDRESS, quoterInterface, provider);
+  const [amountOut] = await quoter.quoteExactInputSingle({
+    tokenIn,
+    tokenOut,
+    amountIn,
+    fee,
+    sqrtPriceLimitX96: 0,
+  });
+  const decimalsOut = (await getTokenDetails(tokenOut, tokenOut, provider)).decimals;
+  return ethers.formatUnits(amountOut, decimalsOut);
+}
+
+async function executeSwap(wallet, tokenIn, tokenOut, amountIn, fee, provider, isBuy = true, slippageTolerance = DEFAULT_SLIPPAGE) {
+  const swapRouterInterface = new ethers.Interface([
+    'function exactInputSingle(tuple(address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96)) external payable returns (uint256 amountOut)',
+  ]);
+  const swapRouter = new ethers.Contract(SWAP_ROUTER_ADDRESS, swapRouterInterface, wallet);
+
+  let amountOutMin = 0n;
+  if (isBuy) {
+    try {
+      const price = await getTokenPrice(tokenIn, tokenOut, amountIn, fee, provider);
+      amountOutMin = ethers.parseUnits(
+        (parseFloat(price) * (1 - slippageTolerance)).toString(),
+        (await getTokenDetails(tokenOut, wallet.address, provider)).decimals
+      );
+    } catch (error) {
+      amountOutMin = 0n;
+    }
+  }
+
+  const gasPrice = await getSafeGasPrice(provider);
+  const params = [tokenIn, tokenOut, fee, wallet.address, amountIn, amountOutMin, 0];
+  const tx = isBuy
+    ? await swapRouter.exactInputSingle(params, { value: amountIn, gasPrice, gasLimit: 500000 })
+    : await swapRouter.exactInputSingle(params, { gasPrice });
+  await tx.wait();
+  return tx.hash;
+}
+
+async function getSafeGasPrice(provider) {
+  const feeData = await provider.getFeeData();
+  const gasPrice = feeData.gasPrice;
+  return gasPrice > MAX_GAS_PRICE ? MAX_GAS_PRICE : gasPrice;
+}
+
+function sortTokens(tokenA, tokenB) {
+  const lowerA = tokenA.toLowerCase();
+  const lowerB = tokenB.toLowerCase();
+  return lowerA < lowerB ? [tokenA, tokenB] : [tokenB, tokenA];
+}
+
+async function withErrorHandling(fn, actionName) {
+  try {
+    await fn();
+  } catch (error) {
+    console.error(`Error in ${actionName}:`, error.message);
+  }
+}
+
+// Main Script
 const provider = new ethers.JsonRpcProvider('https://mainnet.base.org');
-
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 const factoryInterface = new ethers.Interface(['function getPool(address tokenA, address tokenB, uint24 fee) external view returns (address pool)']);
 const factory = new ethers.Contract(FACTORY_ADDRESS, factoryInterface, provider);
@@ -61,12 +172,7 @@ async function initializeWallets() {
     wallets.push(derivedWallet);
     console.log(`Wallet ${i} address: ${derivedWallet.address}`);
   }
-
-  // Removed this line:
-  // const mainWalletBalance = await provider.getBalance(wallets[0].address);
-  // console.log(`${COLORS.BRIGHT_GREEN}\nMain Wallet (BIP-44 #0) Address: ${wallets[0].address} - Balance: ${ethers.formatEther(mainWalletBalance)} ETH${COLORS.RESET}`);
 }
-
 
 async function buyToken() {
   const tokenAddress = await askQuestion('Enter token address to buy: ');
@@ -114,7 +220,7 @@ async function buyToken() {
     return;
   }
 
-  const tokenDetailsAfter = await getTokenDetails(tokenAddress, wallets[0].address, provider, true); // Force refresh
+  const tokenDetailsAfter = await getTokenDetails(tokenAddress, wallets[0].address, provider, true);
   if (!tokenDetailsAfter.error) {
     console.log(`${COLORS.BRIGHT_GREEN}\n--- Token Details After Purchase ---${COLORS.RESET}`, tokenDetailsAfter);
   } else {
@@ -147,7 +253,6 @@ async function sellTokens() {
     console.log('Invalid percentage. Please enter a number between 0 and 100.');
     return;
   }
-  // Use BigInt arithmetic directly
   const amountToSell = (balance * BigInt(Math.round(percentage * 100))) / 10000n;
 
   const tokenDetailsBefore = await getTokenDetails(tokenAddress, wallets[0].address, provider);
@@ -213,7 +318,7 @@ async function sellTokens() {
     return;
   }
 
-  const tokenDetailsAfter = await getTokenDetails(tokenAddress, wallets[0].address, provider, true); // Force refresh
+  const tokenDetailsAfter = await getTokenDetails(tokenAddress, wallets[0].address, provider, true);
   if (!tokenDetailsAfter.error) {
     console.log(`${COLORS.BRIGHT_RED}\n--- Token Details After Sale ---${COLORS.RESET}`, tokenDetailsAfter);
   } else {
@@ -295,7 +400,6 @@ async function sendToken() {
     return;
   }
 
-  // Use BigInt arithmetic directly
   const amount = (balance * BigInt(Math.round(percentage * 100))) / 10000n;
   if (amount === 0n) {
     console.log('Calculated amount to send is 0.');
@@ -317,7 +421,6 @@ async function sendToken() {
   await tx.wait();
   console.log('Token transfer confirmed (Main Wallet, BIP-44 #0)');
 
-  // Refresh balance after transfer
   const tokenDetailsAfter = await getTokenDetails(tokenAddress, wallets[0].address, provider, true);
   if (!tokenDetailsAfter.error) {
     console.log(`${COLORS.BRIGHT_CYAN}\n--- Token Details After Transfer ---${COLORS.RESET}`, tokenDetailsAfter);
@@ -325,6 +428,7 @@ async function sendToken() {
     console.error('Error fetching token details after transfer:', tokenDetailsAfter.error);
   }
 }
+
 async function showWalletBalances() {
   const tokenAddress = await askQuestion('Enter token address (or press Enter for ETH): ');
   console.log('\n--- Wallet Balances ---');
@@ -338,7 +442,7 @@ async function showWalletBalances() {
     }
     console.log(balances.join('\n'));
   } else {
-    const tokenDetails = await getTokenDetails(tokenAddress, wallets[0].address, provider, true); // Force refresh
+    const tokenDetails = await getTokenDetails(tokenAddress, wallets[0].address, provider, true);
     if (tokenDetails.error) {
       console.error('Error fetching token details:', tokenDetails.error);
       return;
@@ -348,7 +452,7 @@ async function showWalletBalances() {
     const balances = [];
     for (let i = 0; i < wallets.length; i++) {
       const wallet = wallets[i];
-      const details = await getTokenDetails(tokenAddress, wallet.address, provider, true); // Force refresh
+      const details = await getTokenDetails(tokenAddress, wallet.address, provider, true);
       const balance = details.error ? 'Error' : details.balance;
       balances.push(`Wallet ${i} address: ${wallet.address} -${COLORS.BRIGHT_BLUE}${tokenDetails.symbol} Balance: ${balance} ${tokenDetails.symbol}${COLORS.RESET}`);
     }
@@ -356,7 +460,7 @@ async function showWalletBalances() {
   }
 }
 
-async function buyWithMultipleWallets() {
+async function buyWithWallets() {
   const tokenAddress = await askQuestion('Enter token address to buy: ');
   if (!ethers.isAddress(tokenAddress)) {
     console.log('Invalid token address.');
@@ -365,6 +469,7 @@ async function buyWithMultipleWallets() {
 
   const minEthStr = await askQuestion('Enter minimum ETH amount to spend (e.g., 0.001): ');
   const maxEthStr = await askQuestion('Enter maximum ETH amount to spend (e.g., 0.01): ');
+
   const minEth = parseFloat(minEthStr);
   const maxEth = parseFloat(maxEthStr);
 
@@ -373,74 +478,20 @@ async function buyWithMultipleWallets() {
     return;
   }
 
-  for (let i = 0; i < wallets.length; i++) {
-    const wallet = wallets[i];
-    const randomEth = minEth + Math.random() * (maxEth - minEth);
-    const amountIn = ethers.parseEther(randomEth.toFixed(6).toString());
-    const balance = await provider.getBalance(wallet.address);
+  const addDelay = await askQuestion('Do you want to add a delay between transactions? (y/n): ');
+  let minDelay = 0;
+  let maxDelay = 0;
+  if (addDelay.toLowerCase() === 'y') {
+    const minDelayStr = await askQuestion('Enter minimum delay in seconds (e.g., 2): ');
+    const maxDelayStr = await askQuestion('Enter maximum delay in seconds (e.g., 60): ');
+    minDelay = parseInt(minDelayStr, 10);
+    maxDelay = parseInt(maxDelayStr, 10);
 
-    if (balance < amountIn + ((await getSafeGasPrice(provider)) * 50000n)) {
-      console.log(`Wallet ${i} (${wallet.address}) has insufficient ETH: ${ethers.formatEther(balance)}`);
-      continue;
+    if (isNaN(minDelay) || isNaN(maxDelay) || minDelay < 0 || maxDelay <= minDelay) {
+      console.log('Invalid delay range. Proceeding without delay.');
+      minDelay = 0;
+      maxDelay = 0;
     }
-
-    const tokenDetailsBefore = await getTokenDetails(tokenAddress, wallet.address, provider);
-    if (tokenDetailsBefore.error) continue;
-    console.log(`${COLORS.BRIGHT_GREEN}\n--- Token Details Before Purchase (Wallet ${i}) ---${COLORS.RESET}`, tokenDetailsBefore);
-
-    if (dryRun) {
-      console.log(`Dry run: Simulating buy for Wallet ${i}...`);
-      continue;
-    }
-
-    let txHash;
-    let success = false;
-    for (const fee of FEE_TIERS) {
-      const [token0, token1] = sortTokens(WETH_ADDRESS, tokenAddress);
-      const poolAddress = await factory.getPool(token0, token1, fee);
-      if (poolAddress === ethers.ZeroAddress) continue;
-      try {
-        txHash = await executeSwap(wallet, WETH_ADDRESS, tokenAddress, amountIn, fee, provider, true);
-        console.log(`Wallet ${i} transaction hash: ${txHash}`);
-        success = true;
-        break;
-      } catch (error) {
-        console.log(`Fee tier ${fee} failed for Wallet ${i}:`, error.message);
-      }
-    }
-    if (!success) continue;
-
-    const tokenDetailsAfter = await getTokenDetails(tokenAddress, wallet.address, provider, true);
-    if (!tokenDetailsAfter.error) {
-      console.log(`${COLORS.BRIGHT_GREEN}\n--- Token Details After Purchase (Wallet ${i}) ---${COLORS.RESET}`, tokenDetailsAfter);
-    }
-  }
-}
-
-async function buyWithWalletsDelayed() {
-  const tokenAddress = await askQuestion('Enter token address to buy: ');
-  if (!ethers.isAddress(tokenAddress)) {
-    console.log('Invalid token address.');
-    return;
-  }
-
-  const minEthStr = await askQuestion('Enter minimum ETH amount to spend (e.g., 0.001): ');
-  const maxEthStr = await askQuestion('Enter maximum ETH amount to spend (e.g., 0.01): ');
-  const minDelayStr = await askQuestion('Enter minimum delay in seconds (e.g., 2): ');
-  const maxDelayStr = await askQuestion('Enter maximum delay in seconds (e.g., 60): ');
-
-  const minEth = parseFloat(minEthStr);
-  const maxEth = parseFloat(maxEthStr);
-  const minDelay = parseInt(minDelayStr, 10);
-  const maxDelay = parseInt(maxDelayStr, 10);
-
-  if (isNaN(minEth) || isNaN(maxEth) || minEth <= 0 || maxEth <= minEth) {
-    console.log('Invalid ETH range.');
-    return;
-  }
-  if (isNaN(minDelay) || isNaN(maxDelay) || minDelay < 0 || maxDelay <= minDelay) {
-    console.log('Invalid delay range.');
-    return;
   }
 
   for (let i = 0; i < wallets.length; i++) {
@@ -485,7 +536,7 @@ async function buyWithWalletsDelayed() {
       console.log(`${COLORS.BRIGHT_GREEN}\n--- Token Details After Purchase (Wallet ${i}) ---${COLORS.RESET}`, tokenDetailsAfter);
     }
 
-    if (i < wallets.length - 1) {
+    if (minDelay > 0 && maxDelay > 0 && i < wallets.length - 1) {
       const randomDelay = minDelay + Math.random() * (maxDelay - minDelay);
       console.log(`Waiting ${randomDelay.toFixed(2)} seconds...`);
       await delay(randomDelay * 1000);
@@ -650,7 +701,6 @@ async function automateBuyAndSell() {
         continue;
       }
       try {
-        // Estimate token amount for output
         tokenAmount = await getTokenPrice(WETH_ADDRESS, tokenAddress, amountIn, fee, provider);
         txHash = await executeSwap(wallet, WETH_ADDRESS, tokenAddress, amountIn, fee, provider, true);
         console.log(`Initial Buy tx hash ${COLORS.BRIGHT_CYAN}(Wallet ${i})${COLORS.RESET}: ${txHash}`);
@@ -696,7 +746,6 @@ async function automateBuyAndSell() {
             continue;
           }
           try {
-            // Estimate token amount for output
             tokenAmount = await getTokenPrice(WETH_ADDRESS, tokenAddress, amountIn, fee, provider);
             txHash = await executeSwap(wallet, WETH_ADDRESS, tokenAddress, amountIn, fee, provider, true);
             console.log(`Random Buy tx hash ${COLORS.BRIGHT_CYAN}(Wallet ${wallets.indexOf(wallet)})${COLORS.RESET}: ${txHash}`);
@@ -792,6 +841,7 @@ async function automateBuyAndSell() {
   console.log('Automation stopped.');
   rl.removeAllListeners('line');
 }
+
 async function sendAllETHFromAllWallets() {
   const recipient = await askQuestion('Enter recipient wallet address to send all ETH: ');
   if (!ethers.isAddress(recipient)) {
@@ -943,9 +993,8 @@ async function start() {
     console.log(`${COLORS.BRIGHT_RED}(8). *Send All ETH from All ${wallets.length} Wallets*${COLORS.RESET}`);
     console.log(`(9). Fund ETH from Main Wallet to Others`);
     console.log(`(10). Buy with ${wallets.length} Wallets`);
-    console.log(`(11). Buy with ${wallets.length} Wallets (Delayed)`);
-    console.log(`(12). Send Selected Token from All ${wallets.length} Wallets`);
-    console.log('(13). Exit');
+    console.log(`(11). Send Selected Token from All ${wallets.length} Wallets`);
+    console.log('(12). Exit');
 
     const choice = await askQuestion('Choose an option: ');
     switch (choice) {
@@ -958,10 +1007,9 @@ async function start() {
       case '7': await withErrorHandling(sellAllTokensFromAllWallets, 'Sell All Tokens'); break;
       case '8': await withErrorHandling(sendAllETHFromAllWallets, 'Send All ETH from All'); break;
       case '9': await withErrorHandling(fundETHToWallets, 'Fund ETH to Wallets'); break;
-      case '10': await withErrorHandling(buyWithMultipleWallets, 'Buy with Multiple Wallets'); break;
-      case '11': await withErrorHandling(buyWithWalletsDelayed, 'Buy with Wallets Delayed'); break;
-      case '12': await withErrorHandling(sendTokenFromAllWallets, 'Send Token from All'); break;
-      case '13':
+      case '10': await withErrorHandling(buyWithWallets, 'Buy with Wallets'); break;
+      case '11': await withErrorHandling(sendTokenFromAllWallets, 'Send Token from All'); break;
+      case '12':
         console.log('Exiting...');
         rl.close();
         process.exit(0);
