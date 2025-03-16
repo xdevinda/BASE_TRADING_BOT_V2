@@ -1,3 +1,5 @@
+@@@@@@@@@@@on VPS@@@@@@@@
+
 //Update Packages:
 
 sudo apt update && sudo apt upgrade -y
@@ -46,4 +48,44 @@ MNEMONIC=//seed phrase here//
 //Run the bot:
 
 node index.js
+
+
+@@@@@@@@Run Locally@@@@@@
+
+//Visit the Node.js website.
+Download the macOS installer (.pkg) for the LTS version.
+Run the installer and follow the prompts.
+Verify the installation in Terminal:
+
+node -v
+npm -v
+
+mkdir token-swapper
+
+cd token-swapper
+
+npm init -y
+
+npm install ethers@6.13.2 dotenv
+
+nano index.js
+
+nano utils.js
+
+nano constants.js
+
+nano .env
+
+
+///Run
+
+node index.js
+
+
+
+
+
+
+
+
 
