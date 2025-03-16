@@ -642,7 +642,10 @@ async function automateBuyAndSell() {
     for (const fee of FEE_TIERS) {
       const [token0, token1] = sortTokens(WETH_ADDRESS, tokenAddress);
       const poolAddress = await factory.getPool(token0, token1, fee);
-      if (poolAddress === ethers.ZeroAddress) continue;
+      if (poolAddress === ethers.ZeroAddress) {
+        console.log(`No pool exists for fee tier ${fee}.`);
+        continue;
+      }
       try {
         txHash = await executeSwap(wallet, WETH_ADDRESS, tokenAddress, amountIn, fee, provider, true);
         console.log(`Initial Buy tx hash ${COLORS.BRIGHT_CYAN}(Wallet ${i})${COLORS.RESET}: ${txHash}`);
@@ -715,11 +718,12 @@ async function automateBuyAndSell() {
         console.log(`Wallet (${wallet.address}) has no tokens to sell.`);
       } else if (!dryRun) {
         const randomSellPercent = minSellPercent + Math.random() * (maxSellPercent - minSellPercent);
-        const amountToSell = balance.mul(BigInt(Math.round(randomSellPercent * 100))).div(10000n);
+        // Use BigInt arithmetic directly
+        const amountToSell = (balance * BigInt(Math.round(randomSellPercent * 100))) / 10000n;
 
         try {
           const allowance = await tokenContract.allowance(wallet.address, SWAP_ROUTER_ADDRESS);
-          if (allowance.lt(amountToSell)) {
+          if (allowance < amountToSell) {
             const gasPrice = await getSafeGasPrice(provider);
             const approveTx = await tokenContract.approve(SWAP_ROUTER_ADDRESS, amountToSell, { gasPrice });
             await approveTx.wait();
@@ -748,7 +752,7 @@ async function automateBuyAndSell() {
                 wallet
               );
               const wethBalance = await wethContract.balanceOf(wallet.address);
-              if (wethBalance.gt(0)) {
+              if (wethBalance > 0n) {
                 const gasPrice = await getSafeGasPrice(provider);
                 await wethContract.withdraw(wethBalance, { gasPrice });
                 console.log(`Withdrew ${ethers.formatEther(wethBalance)} ETH from WETH`);
