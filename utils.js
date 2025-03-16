@@ -14,7 +14,7 @@ const tokenDetailsCache = new Map();
 
 async function getTokenDetails(tokenAddress, walletAddress, provider, forceRefresh = false) {
   const cacheKey = `${tokenAddress}-${walletAddress}`;
-  if (forceRefresh) tokenDetailsCache.delete(cacheKey); // Clear cache if forced
+  if (forceRefresh) tokenDetailsCache.delete(cacheKey);
 
   if (tokenDetailsCache.has(cacheKey) && !forceRefresh) return tokenDetailsCache.get(cacheKey);
 
@@ -34,13 +34,12 @@ async function getTokenDetails(tokenAddress, walletAddress, provider, forceRefre
       provider
     );
 
-    const [name, symbol, decimals, totalSupply, balance] = await Promise.all([
-      tokenContract.name().catch((e) => { console.log(`Name fetch failed: ${e.message}`); return 'Unknown'; }),
-      tokenContract.symbol().catch((e) => { console.log(`Symbol fetch failed: ${e.message}`); return 'Unknown'; }),
-      tokenContract.decimals().catch((e) => { console.log(`Decimals fetch failed: ${e.message}`); return 18; }),
-      tokenContract.totalSupply().catch((e) => { console.log(`TotalSupply fetch failed: ${e.message}`); return BigInt(0); }),
-      tokenContract.balanceOf(walletAddress).catch((e) => { console.log(`Balance fetch failed for ${walletAddress}: ${e.message}`); return BigInt(0); }),
-    ]);
+    // Sequential calls to avoid batch limits
+    const name = await tokenContract.name().catch((e) => { console.log(`Name fetch failed: ${e.message}`); return 'Unknown'; });
+    const symbol = await tokenContract.symbol().catch((e) => { console.log(`Symbol fetch failed: ${e.message}`); return 'Unknown'; });
+    const decimals = await tokenContract.decimals().catch((e) => { console.log(`Decimals fetch failed: ${e.message}`); return 18; });
+    const totalSupply = await tokenContract.totalSupply().catch((e) => { console.log(`TotalSupply fetch failed: ${e.message}`); return BigInt(0); });
+    const balance = await tokenContract.balanceOf(walletAddress).catch((e) => { console.log(`Balance fetch failed for ${walletAddress}: ${e.message}`); return BigInt(0); });
 
     const details = {
       name,
