@@ -57,6 +57,26 @@ token_abi = json.loads('''
 ]
 ''')
 
+# Fjord Foundry presale ABI (simplified, includes redeem and saleToken)
+fjord_abi = json.loads('''
+[
+    {
+        "constant": false,
+        "inputs": [],
+        "name": "redeem",
+        "outputs": [],
+        "type": "function"
+    },
+    {
+        "constant": true,
+        "inputs": [],
+        "name": "saleToken",
+        "outputs": [{"name": "", "type": "address"}],
+        "type": "function"
+    }
+]
+''')
+
 # Approve token spending
 def approve_token(token_address, amount, spender):
     token_contract = w3.eth.contract(address=token_address, abi=token_abi)
@@ -88,19 +108,17 @@ def get_token_decimals(token_address):
 
 # Buy tokens with USDC via 1inch
 def buy_tokens(usdc_amount, slippage, token_address):
-    token_address = w3.to_checksum_address(token_address)  # Ensure checksum format
-    usdc_amount_wei = int(usdc_amount * 10**6)  # USDC has 6 decimals
+    token_address = w3.to_checksum_address(token_address)
+    usdc_amount_wei = int(usdc_amount * 10**6)
     usdc_contract = w3.eth.contract(address=usdc_address, abi=token_abi)
     usdc_balance = usdc_contract.functions.balanceOf(wallet_address).call()
     if usdc_balance < usdc_amount_wei:
         print(f"Insufficient USDC balance: {usdc_balance / 10**6} USDC. Required: {usdc_amount} USDC.")
         return
 
-    # Approve 1inch router to spend USDC before API call
     if not approve_token(usdc_address, usdc_amount_wei, ONE_INCH_ROUTER):
         return
 
-    # 1inch API call to get swap data
     headers = {"Authorization": f"Bearer {ONE_INCH_API_KEY}"}
     params = {
         "fromTokenAddress": usdc_address,
@@ -131,7 +149,6 @@ def buy_tokens(usdc_amount, slippage, token_address):
     token_decimals = get_token_decimals(token_address)
     token_amount = int(swap_data["dstAmount"]) / 10**token_decimals
 
-    # Build and send the swap transaction
     tx = {
         "from": wallet_address,
         "to": ONE_INCH_ROUTER,
@@ -141,9 +158,9 @@ def buy_tokens(usdc_amount, slippage, token_address):
         "value": int(swap_data["tx"]["value"])
     }
     gas_estimate = w3.eth.estimate_gas(tx)
-    tx["gas"] = int(gas_estimate * 1.2)
+    tx['gas'] = int(gas_estimate * 1.2)
     balance = w3.eth.get_balance(wallet_address)
-    gas_cost = tx["gas"] * tx["gasPrice"]
+    gas_cost = tx['gas'] * tx['gasPrice']
     if balance < gas_cost:
         print(f"Insufficient ETH balance: {w3.from_wei(balance, 'ether')} ETH. Required: {w3.from_wei(gas_cost, 'ether')} ETH.")
         return
@@ -160,7 +177,7 @@ def buy_tokens(usdc_amount, slippage, token_address):
 
 # Sell tokens for USDC via 1inch
 def sell_tokens(percentage, slippage, token_address):
-    token_address = w3.to_checksum_address(token_address)  # Ensure checksum format
+    token_address = w3.to_checksum_address(token_address)
     token_contract = w3.eth.contract(address=token_address, abi=token_abi)
     balance = token_contract.functions.balanceOf(wallet_address).call()
     amount_to_sell = int(balance * (percentage / 100))
@@ -168,11 +185,9 @@ def sell_tokens(percentage, slippage, token_address):
         print("No tokens to sell or insufficient balance.")
         return
 
-    # Approve 1inch router to spend tokens before API call
     if not approve_token(token_address, amount_to_sell, ONE_INCH_ROUTER):
         return
 
-    # 1inch API call to get swap data
     headers = {"Authorization": f"Bearer {ONE_INCH_API_KEY}"}
     params = {
         "fromTokenAddress": token_address,
@@ -202,7 +217,6 @@ def sell_tokens(percentage, slippage, token_address):
         return
     usdc_amount = int(swap_data["dstAmount"]) / 10**6
 
-    # Build and send the swap transaction
     tx = {
         "from": wallet_address,
         "to": ONE_INCH_ROUTER,
@@ -229,14 +243,65 @@ def sell_tokens(percentage, slippage, token_address):
     else:
         print("Transaction cancelled.")
 
+# Claim and sell tokens from Fjord Foundry presale
+def claim_and_sell(presale_address, slippage):
+    presale_address = w3.to_checksum_address(presale_address)
+    presale_contract = w3.eth.contract(address=presale_address, abi=fjord_abi)
+
+    # Simulate redeem call to check for revert
+    try:
+        presale_contract.functions.redeem().call({'from': wallet_address})
+        print("Redeem simulation successful, proceeding with transaction...")
+    except Exception as e:
+        print(f"Simulation failed: {str(e)}")
+        if hasattr(e, 'args') and len(e.args) > 0 and isinstance(e.args[0], dict):
+            print(f"Revert reason: {e.args[0].get('message', 'Unknown')}")
+        return
+
+    # Claim tokens
+    try:
+        tx = presale_contract.functions.redeem().build_transaction({
+            'from': wallet_address,
+            'nonce': w3.eth.get_transaction_count(wallet_address),
+            'gasPrice': w3.eth.gas_price
+        })
+        gas_estimate = w3.eth.estimate_gas(tx)
+        tx['gas'] = int(gas_estimate * 1.2)
+        balance = w3.eth.get_balance(wallet_address)
+        gas_cost = tx['gas'] * tx['gasPrice']
+        if balance < gas_cost:
+            print(f"Insufficient ETH balance: {w3.from_wei(balance, 'ether')} ETH. Required: {w3.from_wei(gas_cost, 'ether')} ETH.")
+            return
+        signed_tx = w3.eth.account.sign_transaction(tx, private_key)
+        tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
+        print(f"Tokens claimed successfully! Hash: {tx_hash.hex()}")
+    except Exception as e:
+        print(f"Failed to claim tokens: {str(e)}")
+        if hasattr(e, 'args') and len(e.args) > 0 and isinstance(e.args[0], dict):
+            print(f"Revert reason: {e.args[0].get('message', 'Unknown')}")
+        return
+
+    # Get the token address from the presale contract
+    try:
+        token_address = presale_contract.functions.saleToken().call()
+        print(f"Claimed token address: {token_address}")
+    except Exception as e:
+        print(f"Failed to get token address: {str(e)}")
+        return
+
+    # Sell 100% of the claimed tokens
+    sell_tokens(100, slippage, token_address)
+
 # Menu
 def main_menu():
     while True:
         print("\nAerodrome Swap Menu (via 1inch Aggregator):")
         print("1. Buy Tokens with USDC")
         print("2. Sell Tokens for USDC")
-        print("3. Exit")
-        choice = input("Enter your choice (1-3): ")
+        print("3. Claim and Sell from Fjord Presale")
+        print("4. Exit")
+        choice = input("Enter your choice (1-4): ")
 
         if choice == "1":
             usdc_amount = float(input("Enter USDC amount to spend: "))
@@ -260,6 +325,14 @@ def main_menu():
             sell_tokens(percentage, slippage, token_address)
 
         elif choice == "3":
+            presale_address = input("Enter presale contract address: ")
+            if not w3.is_address(presale_address):
+                print("Invalid presale contract address!")
+                continue
+            slippage = float(input("Enter slippage tolerance (%) for selling: "))
+            claim_and_sell(presale_address, slippage)
+
+        elif choice == "4":
             print("Exiting...")
             break
 
