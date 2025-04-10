@@ -125,7 +125,6 @@ def buy_tokens(usdc_amount, slippage, token_address):
         return
 
     swap_data = response.json()
-    print(f"1inch API response: {json.dumps(swap_data, indent=2)}")  # Debug: Print full response
     if "dstAmount" not in swap_data:
         print("Error: 'dstAmount' not found in 1inch API response. Check API key, parameters, or liquidity.")
         return
@@ -198,7 +197,6 @@ def sell_tokens(percentage, slippage, token_address):
         return
 
     swap_data = response.json()
-    print(f"1inch API response: {json.dumps(swap_data, indent=2)}")  # Debug: Print full response
     if "dstAmount" not in swap_data:
         print("Error: 'dstAmount' not found in 1inch API response. Check API key, parameters, or liquidity.")
         return
