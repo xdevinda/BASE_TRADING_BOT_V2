@@ -1,7 +1,7 @@
 
-private_key = "0x4f7d882e8ed4ef7def64902e8d620e48ad039b443b1c295162175337ebd6abc0"  # Replace with your private key
+private_key = ""  # Replace with your private key
 
-ONE_INCH_API_KEY = "qjvMLYYedBlURNyDx3dI1KgWf79VDIBz"
+ONE_INCH_API_KEY = ""
 
 from web3 import Web3
 import json
@@ -13,19 +13,19 @@ rpc_url = "https://mainnet.base.org"
 w3 = Web3(Web3.HTTPProvider(rpc_url))
 
 # Your wallet details
-private_key = "0x4f7d882e8ed4ef7def64902e8d620e48ad039b443b1c295162175337ebd6abc0"  # Replace with your private key
+private_key = ""  # Replace with your private key
 account = w3.eth.account.from_key(private_key)
 wallet_address = account.address
 
 # 1inch API endpoint for Base (chain ID 8453)
 ONE_INCH_API_BASE = "https://api.1inch.dev/swap/v6.0/8453"
-ONE_INCH_ROUTER = w3.to_checksum_address("0x111111125421ca6dc452d289314280a0f8842a65")  # Checksum address
+ONE_INCH_ROUTER = w3.to_checksum_address("")  # Checksum address
 
 # Your 1inch API key
-ONE_INCH_API_KEY = "qjvMLYYedBlURNyDx3dI1KgWf79VDIBz"
+ONE_INCH_API_KEY = ""
 
 # USDC contract address on Base (checksummed)
-usdc_address = w3.to_checksum_address("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913")
+usdc_address = w3.to_checksum_address("")
 
 # Token ABI for balance, approval, and decimals
 token_abi = json.loads('''
